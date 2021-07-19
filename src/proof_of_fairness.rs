@@ -161,7 +161,6 @@ mod tests {
         assert!(verify.is_ok());
     }
 
-    #[should_panic]
     #[test]
     fn test_bad_fairness_proof() {
         let (ek, _) = Paillier::keypair().keys();
@@ -185,6 +184,6 @@ mod tests {
 
         let proof = FairnessProof::prove(&witness, &statement);
         let verify = proof.verify(&statement);
-        assert!(verify.is_ok());
+        assert!(verify.is_err());
     }
 }
