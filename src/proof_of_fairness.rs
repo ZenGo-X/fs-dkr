@@ -1,13 +1,14 @@
 #![allow(non_snake_case)]
+#![allow(clippy::many_single_char_names)]
 
-use curv::BigInt;
 use paillier::Paillier;
 use paillier::{Add, EncryptWithChosenRandomness, Mul, RawCiphertext};
 use paillier::{EncryptionKey, Randomness, RawPlaintext};
 
-use curv::arithmetic::{Modulo, Samplable};
+use curv::arithmetic::{BigInt, Modulo, Samplable};
 use curv::cryptographic_primitives::hashing::hash_sha256::HSha256;
 use curv::cryptographic_primitives::hashing::traits::Hash;
+use curv::cryptographic_primitives::proofs::ProofError;
 use curv::elliptic::curves::traits::*;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
@@ -69,7 +70,7 @@ where
         .0
         .into_owned();
         let u_fe: P::Scalar = ECScalar::from(&u);
-        let T = P::generator() * u_fe.clone();
+        let T = P::generator() * u_fe;
 
         let e = HSha256::create_hash(&[
             &T.bytes_compressed_to_big_int(),
@@ -85,7 +86,7 @@ where
         FairnessProof { e_u, T, z, w }
     }
 
-    pub fn verify(&self, statement: &FairnessStatement<P>) -> Result<(), ()> {
+    pub fn verify(&self, statement: &FairnessStatement<P>) -> Result<(), ProofError> {
         let e = HSha256::create_hash(&[
             &self.T.bytes_compressed_to_big_int(),
             &self.e_u,
@@ -111,14 +112,14 @@ where
             .into_owned();
 
         let z_fe: P::Scalar = ECScalar::from(&self.z);
-        let z_G = P::generator() * z_fe.clone();
+        let z_G = P::generator() * z_fe;
         let e_fe: P::Scalar = ECScalar::from(&e);
-        let e_Y = statement.Y.clone() * e_fe.clone();
+        let e_Y = statement.Y.clone() * e_fe;
         let T_add_e_Y = e_Y + self.T.clone();
 
         match T_add_e_Y == z_G && e_u_add_c_e == enc_z_w {
             true => Ok(()),
-            false => Err(()),
+            false => Err(ProofError),
         }
     }
 }

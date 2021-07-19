@@ -1,4 +1,4 @@
-mod proof_of_fairness;
+pub mod proof_of_fairness;
 
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
 use curv::elliptic::curves::secp256_k1::GE;
