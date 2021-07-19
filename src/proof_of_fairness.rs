@@ -12,8 +12,8 @@ use curv::elliptic::curves::traits::*;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// non interactive proof of fairness, taken from [https://hal.inria.fr/inria-00565274/document]
-
+/// Non interactive proof of fairness, taken from <https://hal.inria.fr/inria-00565274/document>
+///
 /// Witness: x
 ///
 /// Statement: {c, Y} such that c = g^x * r^N mod N^2  and Y = x*G
@@ -21,14 +21,14 @@ use zeroize::Zeroize;
 /// Protocol:
 ///
 /// 1. P picks random values u from Z_n, s from Z_n*
-///    and computes e_u = g^u * s^N mod N^2 ,  T = u*G
+///    and computes e_u = g^u * s^N mod N^2 , T = u*G
 /// 2. using Fiat-Shamir the parties computes a challenge e
-/// 3. P sends z = u + ex , w = s* r^e mod N^2
-/// 4. V checks:
-///     T  = z*G - e*Y
-///     e_u = g^z * w^N * c^{-e} mod N^2
+/// 3. P sends z = u + ex , w = s * r^e mod N^2
+/// 4. V checks: \
+///     `T  = z*G - e*Y` \
+///     `e_u = g^z * w^N * c^{-e} mod N^2`
 ///
-/// note: we need u to hide ex : |u| > |ex| + SEC_PARAM, taking u from Z_n works assuming
+/// _Note_: we need u to hide ex : |u| > |ex| + SEC_PARAM, taking u from Z_n works assuming
 /// n = 2048, |x| < 256, |e| < 256
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
