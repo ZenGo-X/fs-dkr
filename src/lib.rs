@@ -1,5 +1,7 @@
+mod error;
 mod proof_of_fairness;
 
+use crate::error::{FsDkrError, FsDkrResult};
 use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
 use curv::arithmetic::{Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
@@ -11,10 +13,12 @@ use paillier::{
     Add, Decrypt, Encrypt, EncryptWithChosenRandomness, Paillier, Randomness, RawCiphertext,
     RawPlaintext,
 };
+use rayon::prelude::*;
 use std::fmt::Debug;
 use zeroize::Zeroize;
 
 // Everything here can be broadcastes
+#[derive(Clone, PartialEq)]
 pub struct RefreshMessage<P> {
     fairness_proof_vec: Vec<FairnessProof<P>>,
     coefficients_committed_vec: VerifiableSS<P>,
@@ -78,31 +82,78 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey) -> Result<LocalKey, ()>
+    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey) -> FsDkrResult<LocalKey>
     where
         P: ECPoint<Scalar = Secp256k1Scalar> + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        // TODO: make error verbose/output indices of malicious parties
         // check we got at least threshold t refresh messages
         if refresh_messages.len() <= old_key.t as usize {
-            return Err(());
+            return Err(FsDkrError::PartiesThresholdViolation {
+                threshold: old_key.t,
+                refreshed_keys: refresh_messages.len(),
+            });
         }
-        // TODO: add more sanity checks: all refresh messages are different. all vectors are of same length
-        // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
 
-        // TODO: paralleize
+        // check all vectors are of same length
+        let reference_len = refresh_messages[0].fairness_proof_vec.len();
+
         for k in 0..refresh_messages.len() {
-            for i in 0..(old_key.n as usize) {
-                //TODO: we should handle the case of t<i<n
-                if refresh_messages[k]
-                    .coefficients_committed_vec
-                    .validate_share_public(&refresh_messages[k].points_committed_vec[i], i + 1)
-                    .is_err()
-                {
-                    return Err(());
-                }
+            let fairness_proof_len = refresh_messages[k].fairness_proof_vec.len();
+            let points_commited_len = refresh_messages[k].points_committed_vec.len();
+            let points_encrypted_len = refresh_messages[k].points_encrypted_vec.len();
+
+            if !(fairness_proof_len == reference_len
+                && points_commited_len == reference_len
+                && points_encrypted_len == reference_len)
+            {
+                return Err(FsDkrError::SizeMismatchError {
+                    refresh_message_index: k,
+                    fairness_proof_len,
+                    points_commited_len,
+                    points_encrypted_len,
+                });
             }
+        }
+
+        // Tudor: Not sure yet what it means for a refresh message to be duplicated
+        for i in 1..refresh_messages.len() {
+            if refresh_messages[i..].contains(&refresh_messages[i - 1]) {
+                return Err(FsDkrError::DuplicatedRefreshMessage);
+            }
+        }
+
+        // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
+        let refresh_idx = 0..refresh_messages.len();
+        let commit_idx = 0..refresh_messages[0].points_committed_vec.len();
+
+        // TODO Tudor: This needs more thinking, currently  there are refresh_messages * commit_points
+        // copies happening, might be worth to pin a refresh_message to a thread
+        let parallel_indexes: Vec<(Self, usize)> = refresh_idx
+            .flat_map(|x| {
+                commit_idx
+                    .clone()
+                    .map(move |y| (refresh_messages[x].clone(), y))
+            })
+            .collect();
+
+        let invalid_shares: bool =
+            parallel_indexes
+                .par_iter()
+                .any(move |(refresh_message, commit_index)| {
+                    //TODO: we should handle the case of t<i<n
+
+                    refresh_message
+                        .coefficients_committed_vec
+                        .validate_share_public(
+                            &refresh_message.points_committed_vec[*commit_index],
+                            commit_index + 1,
+                        )
+                        .is_err()
+                });
+
+        if invalid_shares {
+            return Err(FsDkrError::PublicShareValidationError);
         }
 
         // verify all  fairness proofs
@@ -119,7 +170,7 @@ impl<P> RefreshMessage<P> {
                     .verify(&statement)
                     .is_err()
                 {
-                    return Err(());
+                    return Err(FsDkrError::FairnessProof);
                 }
             }
         }
@@ -155,7 +206,6 @@ impl<P> RefreshMessage<P> {
         new_key.keys_linear.y = Secp256k1Point::generator() * new_share_fe.clone();
 
         // TODO: delete old secret keys
-
         return Ok(new_key);
     }
 }
