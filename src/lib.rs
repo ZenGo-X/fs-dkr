@@ -3,7 +3,6 @@ mod proof_of_fairness;
 use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
 use curv::arithmetic::{Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
-use curv::elliptic::curves::secp256_k1::Secp256k1Scalar;
 use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
@@ -23,12 +22,12 @@ pub struct RefreshMessage<P> {
 }
 
 impl<P> RefreshMessage<P> {
-    pub fn distribute(old_key: &LocalKey) -> Self
+    pub fn distribute(old_key: &LocalKey<P>) -> Self
     where
-        P: ECPoint<Scalar = Secp256k1Scalar> + Clone + Zeroize,
-        P::Scalar: PartialEq + Clone + Debug,
+        P: ECPoint + Clone + Zeroize,
+        P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        let secret = old_key.keys_additive.u_i;
+        let secret = old_key.keys_additive.u_i.clone();
         // secret share old key
         let (vss_scheme, secret_shares) =
             VerifiableSS::<P>::share(old_key.t as usize, old_key.n as usize, &secret);
@@ -78,10 +77,10 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: &LocalKey) -> Result<LocalKey, ()>
+    pub fn collect(refresh_messages: &Vec<Self>, old_key: &LocalKey<P>) -> Result<LocalKey<P>, ()>
     where
-        P: ECPoint<Scalar = Secp256k1Scalar> + Clone + Zeroize,
-        P::Scalar: PartialEq + Clone + Debug,
+        P: ECPoint + Clone + Zeroize,
+        P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
         // TODO: make error verbose/output indices of malicious parties
         // check we got at least threshold t refresh messages
@@ -145,14 +144,14 @@ impl<P> RefreshMessage<P> {
             .0
             .into_owned();
         println!("new share {:?}", new_share.clone());
-        let new_share_fe: Secp256k1Scalar = ECScalar::from(&new_share);
+        let new_share_fe: P::Scalar = ECScalar::from(&new_share);
 
         // TODO: check correctness of new Paillier keys and update local key
         // update old key and output new key
         let mut new_key = old_key.clone();
-        new_key.keys_linear.x_i = new_share_fe;
+        new_key.keys_linear.x_i = new_share_fe.clone();
         // TODO: fix
-        // new_key.keys_linear.y = P::generator() * new_share_fe.clone();
+        new_key.keys_linear.y = P::generator() * new_share_fe;
 
         // TODO: delete old secret keys
 
