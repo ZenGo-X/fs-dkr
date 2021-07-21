@@ -20,8 +20,8 @@ default-features = false
 
 [dependencies.multi-party-ecdsa]
 git = "https://github.com/ZenGo-X/multi-party-ecdsa"
-#branch = "generic-local-key"
-tag = "v0.5.0"
+branch = "generic-local-key"
+#tag = "v0.5.0"
 default-features = false
 
 [dependencies]
