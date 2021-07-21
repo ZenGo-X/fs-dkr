@@ -3,7 +3,7 @@ mod proof_of_fairness;
 use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
 use curv::arithmetic::{Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
-use curv::elliptic::curves::secp256_k1::Secp256k1Scalar;
+use curv::elliptic::curves::secp256_k1::{Secp256k1Point, Secp256k1Scalar};
 use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
@@ -78,10 +78,10 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: &LocalKey) -> Result<LocalKey, ()>
+    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey) -> Result<LocalKey, ()>
     where
         P: ECPoint<Scalar = Secp256k1Scalar> + Clone + Zeroize,
-        P::Scalar: PartialEq + Clone + Debug,
+        P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
         // TODO: make error verbose/output indices of malicious parties
         // check we got at least threshold t refresh messages
@@ -145,14 +145,14 @@ impl<P> RefreshMessage<P> {
             .0
             .into_owned();
         println!("new share {:?}", new_share.clone());
-        let new_share_fe: Secp256k1Scalar = ECScalar::from(&new_share);
+        let new_share_fe: P::Scalar = ECScalar::from(&new_share);
 
         // TODO: check correctness of new Paillier keys and update local key
         // update old key and output new key
-        let mut new_key = old_key.clone();
+        let mut new_key = old_key;
         new_key.keys_linear.x_i = new_share_fe;
         // TODO: fix
-        // new_key.keys_linear.y = P::generator() * new_share_fe.clone();
+        new_key.keys_linear.y = Secp256k1Point::generator() * new_share_fe.clone();
 
         // TODO: delete old secret keys
 
@@ -191,7 +191,7 @@ mod tests {
         }
         let mut new_keys: Vec<LocalKey> = Vec::new();
         for i in 0..n as usize {
-            new_keys.push(RefreshMessage::collect(&broadcast_vec, &old_keys[i]).expect(""));
+            new_keys.push(RefreshMessage::collect(&broadcast_vec, old_keys[i].clone()).expect(""));
         }
         // check that sum of old keys is equal to sum of new keys
         let old_linear_secret_key: Vec<_> = (0..old_keys.len())

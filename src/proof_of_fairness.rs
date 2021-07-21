@@ -85,7 +85,11 @@ where
         FairnessProof { e_u, T, z, w }
     }
 
-    pub fn verify(&self, statement: &FairnessStatement<P>) -> Result<(), ()> {
+    pub fn verify(&self, statement: &FairnessStatement<P>) -> Result<(), ()>
+    where
+        P: ECPoint + Clone + Zeroize,
+        P::Scalar: PartialEq + Clone + Zeroize,
+    {
         let e = HSha256::create_hash(&[
             &self.T.bytes_compressed_to_big_int(),
             &self.e_u,
