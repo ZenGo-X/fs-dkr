@@ -82,7 +82,7 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey<P>) -> FsDkrResult<LocalKey<P>>
+    pub fn collect(refresh_messages: &Vec<Self>, mut old_key: LocalKey<P>) -> FsDkrResult<LocalKey<P>>
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
@@ -200,12 +200,11 @@ impl<P> RefreshMessage<P> {
 
         // TODO: check correctness of new Paillier keys and update local key
         // update old key and output new key
+        old_key.keys_linear.x_i.zeroize();
+
         let mut new_key = old_key;
         new_key.keys_linear.x_i = new_share_fe.clone();
-        // TODO: fix
         new_key.keys_linear.y = P::generator() * new_share_fe.clone();
-
-        // TODO: delete old secret keys
 
         return Ok(new_key);
     }
