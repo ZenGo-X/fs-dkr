@@ -146,7 +146,7 @@ impl<P> RefreshMessage<P> {
                 )
                 .to_big_int();
                 Paillier::mul(
-                    &old_key.keys_additive.ek,
+                    &old_key.paillier_key_vec[old_key.i as usize - 1],
                     RawCiphertext::from(ciphertext_vec[i].clone()),
                     RawPlaintext::from(li),
                 )
@@ -155,13 +155,19 @@ impl<P> RefreshMessage<P> {
 
         let cipher_text_sum = ciphertext_vec_at_indices_mapped.iter().fold(
             Paillier::encrypt(
-                &old_key.keys_additive.ek,
+                &old_key.paillier_key_vec[old_key.i as usize - 1],
                 RawPlaintext::from(BigInt::zero()),
             ),
-            |acc, x| Paillier::add(&old_key.keys_additive.ek, acc, x.clone()),
+            |acc, x| {
+                Paillier::add(
+                    &old_key.paillier_key_vec[old_key.i as usize - 1],
+                    acc,
+                    x.clone(),
+                )
+            },
         );
 
-        let new_share = Paillier::decrypt(&old_key.keys_additive.dk, cipher_text_sum)
+        let new_share = Paillier::decrypt(&old_key.paillier_dk, cipher_text_sum)
             .0
             .into_owned();
 
@@ -198,8 +204,8 @@ mod tests {
         let mut simulation = Simulation::new();
         simulation.enable_benchmarks(false);
 
-        let t = 1;
-        let n = 3;
+        let t = 3;
+        let n = 5;
         for i in 1..=n {
             simulation.add_party(Keygen::new(i, t, n).unwrap());
         }
