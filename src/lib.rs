@@ -17,7 +17,7 @@ use zeroize::Zeroize;
 use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
 
 // Everything here can be broadcasted
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct RefreshMessage<P> {
     party_index: usize,
     fairness_proof_vec: Vec<FairnessProof<P>>,
@@ -126,10 +126,15 @@ impl<P> RefreshMessage<P> {
             }
         }
 
-
         for i in 0..refresh_messages.len() {
-            if refresh_messages[i].dk_correctness_proof.verify(&refresh_messages[i], SALT_STRING).is_err() {
-
+            if refresh_messages[i]
+                .dk_correctness_proof
+                .verify(&refresh_messages[i].ek, SALT_STRING)
+                .is_err()
+            {
+                return Err(FsDkrError::PaillierVerificationError {
+                    party_index: refresh_messages[i].party_index,
+                });
             }
         }
         // TODO: for all parties: check that commitment to zero coefficient is the same as local public key
@@ -253,7 +258,7 @@ mod tests {
 
         let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
         for i in 0..n as usize {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(&old_keys[i]);
+            let (refresh_message, _new_dk) = RefreshMessage::distribute(&old_keys[i]);
             broadcast_vec.push(refresh_message);
         }
         let mut new_keys: Vec<LocalKey> = Vec::new();
