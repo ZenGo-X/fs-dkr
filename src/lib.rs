@@ -9,11 +9,12 @@ use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
 use paillier::{
-    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, Mul, Paillier, Randomness, RawCiphertext,
-    RawPlaintext,
+    Add, Decrypt, DecryptionKey, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
+    KeyGeneration, Mul, Paillier, Randomness, RawCiphertext, RawPlaintext,
 };
 use std::fmt::Debug;
 use zeroize::Zeroize;
+use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
 
 // Everything here can be broadcasted
 #[derive(Clone, PartialEq)]
@@ -23,10 +24,12 @@ pub struct RefreshMessage<P> {
     coefficients_committed_vec: VerifiableSS<P>,
     points_committed_vec: Vec<P>,
     points_encrypted_vec: Vec<BigInt>,
+    ek: EncryptionKey,
+    dk_correctness_proof: NICorrectKeyProof,
 }
 
 impl<P> RefreshMessage<P> {
-    pub fn distribute(old_key: &LocalKey<P>) -> Self
+    pub fn distribute(old_key: &LocalKey<P>) -> (Self, DecryptionKey)
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
@@ -71,14 +74,21 @@ impl<P> RefreshMessage<P> {
             })
             .collect();
 
-        // TODO: generate a new Paillier key and proof of correct key. add it to broadcast
-        RefreshMessage {
-            party_index: old_key.i as usize,
-            fairness_proof_vec,
-            coefficients_committed_vec: vss_scheme,
-            points_committed_vec,
-            points_encrypted_vec,
-        }
+        let (ek, dk) = Paillier::keypair().keys();
+        let dk_correctness_proof = NICorrectKeyProof::proof(&dk, None);
+
+        (
+            RefreshMessage {
+                party_index: old_key.i as usize,
+                fairness_proof_vec,
+                coefficients_committed_vec: vss_scheme,
+                points_committed_vec,
+                points_encrypted_vec,
+                ek,
+                dk_correctness_proof,
+            },
+            dk,
+        )
     }
 
     // TODO: change Vec<Self> to slice
@@ -116,6 +126,12 @@ impl<P> RefreshMessage<P> {
             }
         }
 
+
+        for i in 0..refresh_messages.len() {
+            if refresh_messages[i].dk_correctness_proof.verify(&refresh_messages[i], SALT_STRING).is_err() {
+
+            }
+        }
         // TODO: for all parties: check that commitment to zero coefficient is the same as local public key
         // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
         // TODO: paralleize
@@ -237,7 +253,8 @@ mod tests {
 
         let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
         for i in 0..n as usize {
-            broadcast_vec.push(RefreshMessage::distribute(&old_keys[i]));
+            let (refresh_message, new_dk) = RefreshMessage::distribute(&old_keys[i]);
+            broadcast_vec.push(refresh_message);
         }
         let mut new_keys: Vec<LocalKey> = Vec::new();
         for i in 0..n as usize {
