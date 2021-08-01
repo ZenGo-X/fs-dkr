@@ -82,7 +82,7 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey<P>) -> Result<LocalKey<P>, ()>
+    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey<P>) -> FsDkrResult<LocalKey<P>>
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
@@ -113,13 +113,6 @@ impl<P> RefreshMessage<P> {
                     points_commited_len,
                     points_encrypted_len,
                 });
-            }
-        }
-
-        // check that all the contents are not duplicated
-        for i in 1..refresh_messages.len() {
-            if refresh_messages[i..].contains(&refresh_messages[i - 1]) {
-                return Err(FsDkrError::DuplicatedRefreshMessage);
             }
         }
 
