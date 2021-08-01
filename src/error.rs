@@ -8,7 +8,7 @@ pub enum FsDkrError {
     PartiesThresholdViolation {
         threshold: u16,
         refreshed_keys: usize,
-        // TODO: figure out how to retrieve the malicious parties indexes and add them to the error.
+        // TODO: figure out how to retrieve the malicious parties indexes and add them to the err.
         // malicious_parties: [usize]
     },
 
