@@ -1,5 +1,7 @@
+mod error;
 mod proof_of_fairness;
 
+use crate::error::{FsDkrError, FsDkrResult};
 use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
 use curv::arithmetic::{Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
@@ -13,7 +15,8 @@ use paillier::{
 use std::fmt::Debug;
 use zeroize::Zeroize;
 
-// Everything here can be broadcastes
+// Everything here can be broadcasted
+#[derive(Clone, PartialEq)]
 pub struct RefreshMessage<P> {
     party_index: usize,
     fairness_proof_vec: Vec<FairnessProof<P>>,
@@ -79,17 +82,39 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey<P>) -> Result<LocalKey<P>, ()>
+    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey<P>) -> FsDkrResult<LocalKey<P>>
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        // TODO: make error verbose/output indices of malicious parties
         // check we got at least threshold t refresh messages
         if refresh_messages.len() <= old_key.t as usize {
-            return Err(());
+            return Err(FsDkrError::PartiesThresholdViolation {
+                threshold: old_key.t,
+                refreshed_keys: refresh_messages.len(),
+            });
         }
-        // TODO: add more sanity checks: all refresh messages are different. all vectors are of same length
+
+        // check all vectors are of same length
+        let reference_len = refresh_messages[0].fairness_proof_vec.len();
+
+        for k in 0..refresh_messages.len() {
+            let fairness_proof_len = refresh_messages[k].fairness_proof_vec.len();
+            let points_commited_len = refresh_messages[k].points_committed_vec.len();
+            let points_encrypted_len = refresh_messages[k].points_encrypted_vec.len();
+
+            if !(fairness_proof_len == reference_len
+                && points_commited_len == reference_len
+                && points_encrypted_len == reference_len)
+            {
+                return Err(FsDkrError::SizeMismatchError {
+                    refresh_message_index: k,
+                    fairness_proof_len,
+                    points_commited_len,
+                    points_encrypted_len,
+                });
+            }
+        }
 
         // TODO: for all parties: check that commitment to zero coefficient is the same as local public key
         // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
@@ -102,7 +127,7 @@ impl<P> RefreshMessage<P> {
                     .validate_share_public(&refresh_messages[k].points_committed_vec[i], i + 1)
                     .is_err()
                 {
-                    return Err(());
+                    return Err(FsDkrError::PublicShareValidationError);
                 }
             }
         }
@@ -121,7 +146,7 @@ impl<P> RefreshMessage<P> {
                     .verify(&statement)
                     .is_err()
                 {
-                    return Err(());
+                    return Err(FsDkrError::FairnessProof);
                 }
             }
         }
