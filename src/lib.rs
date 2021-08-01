@@ -5,12 +5,11 @@ use crate::error::{FsDkrError, FsDkrResult};
 use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
 use curv::arithmetic::{Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
-use curv::elliptic::curves::secp256_k1::{Secp256k1Point, Secp256k1Scalar};
 use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
 use paillier::{
-    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, Paillier, Randomness, RawCiphertext,
+    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, Mul, Paillier, Randomness, RawCiphertext,
     RawPlaintext,
 };
 use std::fmt::Debug;
@@ -19,6 +18,7 @@ use zeroize::Zeroize;
 // Everything here can be broadcasted
 #[derive(Clone, PartialEq)]
 pub struct RefreshMessage<P> {
+    party_index: usize,
     fairness_proof_vec: Vec<FairnessProof<P>>,
     coefficients_committed_vec: VerifiableSS<P>,
     points_committed_vec: Vec<P>,
@@ -26,12 +26,12 @@ pub struct RefreshMessage<P> {
 }
 
 impl<P> RefreshMessage<P> {
-    pub fn distribute(old_key: &LocalKey) -> Self
+    pub fn distribute(old_key: &LocalKey<P>) -> Self
     where
-        P: ECPoint<Scalar = Secp256k1Scalar> + Clone + Zeroize,
-        P::Scalar: PartialEq + Clone + Debug,
+        P: ECPoint + Clone + Zeroize,
+        P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        let secret = old_key.keys_additive.u_i;
+        let secret = old_key.keys_linear.x_i.clone();
         // secret share old key
         let (vss_scheme, secret_shares) =
             VerifiableSS::<P>::share(old_key.t as usize, old_key.n as usize, &secret);
@@ -73,6 +73,7 @@ impl<P> RefreshMessage<P> {
 
         // TODO: generate a new Paillier key and proof of correct key. add it to broadcast
         RefreshMessage {
+            party_index: old_key.i as usize,
             fairness_proof_vec,
             coefficients_committed_vec: vss_scheme,
             points_committed_vec,
@@ -81,9 +82,9 @@ impl<P> RefreshMessage<P> {
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey) -> FsDkrResult<LocalKey>
+    pub fn collect(refresh_messages: &Vec<Self>, old_key: LocalKey<P>) -> Result<LocalKey<P>, ()>
     where
-        P: ECPoint<Scalar = Secp256k1Scalar> + Clone + Zeroize,
+        P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
         // check we got at least threshold t refresh messages
@@ -122,7 +123,9 @@ impl<P> RefreshMessage<P> {
             }
         }
 
-        // TODO Tudor: make this for paralel using std
+        // TODO: for all parties: check that commitment to zero coefficient is the same as local public key
+        // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
+        // TODO: paralleize
         for k in 0..refresh_messages.len() {
             for i in 0..(old_key.n as usize) {
                 //TODO: we should handle the case of t<i<n
@@ -155,35 +158,59 @@ impl<P> RefreshMessage<P> {
             }
         }
 
+        // TODO: check we have large enough qualified set , at least t+1
         //decrypt the new share
         // we first homomorphically add all ciphertext encrypted using our encryption key
         let ciphertext_vec: Vec<_> = (0..refresh_messages.len())
-            .map(|k| {
-                // TODO: old_key.i fix to general case
-                refresh_messages[k].points_encrypted_vec[(old_key.i - 1) as usize].clone()
+            .map(|k| refresh_messages[k].points_encrypted_vec[(old_key.i - 1) as usize].clone())
+            .collect();
+
+        let indices: Vec<_> = (0..(old_key.t + 1) as usize)
+            .map(|i| refresh_messages[i].party_index - 1)
+            .collect();
+        // optimization - one decryption
+        let ciphertext_vec_at_indices_mapped: Vec<_> = (0..(old_key.t + 1) as usize)
+            .map(|i| {
+                let li = VerifiableSS::<P>::map_share_to_new_params(
+                    &old_key.vss_scheme.parameters,
+                    indices[i],
+                    &indices,
+                )
+                .to_big_int();
+                Paillier::mul(
+                    &old_key.paillier_key_vec[old_key.i as usize - 1],
+                    RawCiphertext::from(ciphertext_vec[i].clone()),
+                    RawPlaintext::from(li),
+                )
             })
             .collect();
 
-        let cipher_text_sum = ciphertext_vec.iter().fold(
+        let cipher_text_sum = ciphertext_vec_at_indices_mapped.iter().fold(
             Paillier::encrypt(
-                &old_key.keys_additive.ek,
+                &old_key.paillier_key_vec[old_key.i as usize - 1],
                 RawPlaintext::from(BigInt::zero()),
             ),
-            |acc, x| Paillier::add(&old_key.keys_additive.ek, acc, RawCiphertext::from(x)),
+            |acc, x| {
+                Paillier::add(
+                    &old_key.paillier_key_vec[old_key.i as usize - 1],
+                    acc,
+                    x.clone(),
+                )
+            },
         );
 
-        let new_share = Paillier::decrypt(&old_key.keys_additive.dk, cipher_text_sum)
+        let new_share = Paillier::decrypt(&old_key.paillier_dk, cipher_text_sum)
             .0
             .into_owned();
-        println!("new share {:?}", new_share.clone());
+
         let new_share_fe: P::Scalar = ECScalar::from(&new_share);
 
         // TODO: check correctness of new Paillier keys and update local key
         // update old key and output new key
         let mut new_key = old_key;
-        new_key.keys_linear.x_i = new_share_fe;
+        new_key.keys_linear.x_i = new_share_fe.clone();
         // TODO: fix
-        new_key.keys_linear.y = Secp256k1Point::generator() * new_share_fe.clone();
+        new_key.keys_linear.y = P::generator() * new_share_fe.clone();
 
         // TODO: delete old secret keys
 
@@ -209,8 +236,8 @@ mod tests {
         let mut simulation = Simulation::new();
         simulation.enable_benchmarks(false);
 
-        let t = 2;
-        let n = 3;
+        let t = 3;
+        let n = 5;
         for i in 1..=n {
             simulation.add_party(Keygen::new(i, t, n).unwrap());
         }
@@ -231,7 +258,7 @@ mod tests {
         let new_linear_secret_key: Vec<_> = (0..new_keys.len())
             .map(|i| new_keys[i].keys_linear.x_i)
             .collect();
-        let indices: Vec<_> = (0..old_keys.len()).map(|i| i).collect();
+        let indices: Vec<_> = (0..(t + 1) as usize).map(|i| i).collect();
         let vss = VerifiableSS::<GE> {
             parameters: ShamirSecretSharing {
                 threshold: t as usize,
@@ -240,8 +267,8 @@ mod tests {
             commitments: Vec::new(),
         };
         assert_eq!(
-            vss.reconstruct(&indices[..], &old_linear_secret_key[..]),
-            vss.reconstruct(&indices[..], &new_linear_secret_key[..])
+            vss.reconstruct(&indices[..], &old_linear_secret_key[0..(t + 1) as usize]),
+            vss.reconstruct(&indices[..], &new_linear_secret_key[0..(t + 1) as usize])
         );
         assert_ne!(old_linear_secret_key, new_linear_secret_key);
         // TODO: generate a signature and check it verifies with the same public  key
