@@ -24,12 +24,12 @@ pub struct RefreshMessage<P> {
     coefficients_committed_vec: VerifiableSS<P>,
     points_committed_vec: Vec<P>,
     points_encrypted_vec: Vec<BigInt>,
-    ek: EncryptionKey,
     dk_correctness_proof: NICorrectKeyProof,
+    ek: EncryptionKey,
 }
 
 impl<P> RefreshMessage<P> {
-    pub fn distribute(old_key: &LocalKey<P>) -> (Self, DecryptionKey)
+    pub fn distribute(old_key: &mut LocalKey<P>) -> (Self, DecryptionKey)
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
@@ -84,15 +84,19 @@ impl<P> RefreshMessage<P> {
                 coefficients_committed_vec: vss_scheme,
                 points_committed_vec,
                 points_encrypted_vec,
-                ek,
                 dk_correctness_proof,
+                ek: ek,
             },
             dk,
         )
     }
 
     // TODO: change Vec<Self> to slice
-    pub fn collect(refresh_messages: &Vec<Self>, mut old_key: LocalKey<P>) -> FsDkrResult<LocalKey<P>>
+    pub fn collect(
+        refresh_messages: &Vec<Self>,
+        mut old_key: LocalKey<P>,
+        new_dk: DecryptionKey,
+    ) -> FsDkrResult<LocalKey<P>>
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
@@ -126,17 +130,6 @@ impl<P> RefreshMessage<P> {
             }
         }
 
-        for i in 0..refresh_messages.len() {
-            if refresh_messages[i]
-                .dk_correctness_proof
-                .verify(&refresh_messages[i].ek, SALT_STRING)
-                .is_err()
-            {
-                return Err(FsDkrError::PaillierVerificationError {
-                    party_index: refresh_messages[i].party_index,
-                });
-            }
-        }
         // TODO: for all parties: check that commitment to zero coefficient is the same as local public key
         // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
         // TODO: paralleize
@@ -213,13 +206,33 @@ impl<P> RefreshMessage<P> {
             },
         );
 
+        for i in 0..refresh_messages.len() {
+            if refresh_messages[i]
+                .dk_correctness_proof
+                .verify(&refresh_messages[i].ek, SALT_STRING)
+                .is_err()
+            {
+                return Err(FsDkrError::PaillierVerificationError {
+                    party_index: refresh_messages[i].party_index,
+                });
+            }
+
+            // if the proof checks, we add the new paillier public key to the key
+            old_key.paillier_key_vec[refresh_messages[i].party_index - 1] =
+                refresh_messages[i].ek.clone();
+        }
+
         let new_share = Paillier::decrypt(&old_key.paillier_dk, cipher_text_sum)
             .0
             .into_owned();
 
         let new_share_fe: P::Scalar = ECScalar::from(&new_share);
 
-        // TODO: check correctness of new Paillier keys and update local key
+        // zeroize
+        old_key.paillier_dk.q.zeroize();
+        old_key.paillier_dk.p.zeroize();
+        old_key.paillier_dk = new_dk;
+
         // update old key and output new key
         old_key.keys_linear.x_i.zeroize();
 
@@ -241,6 +254,7 @@ mod tests {
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{
         Keygen, LocalKey,
     };
+    use paillier::DecryptionKey;
     use round_based::dev::Simulation;
 
     #[test]
@@ -254,16 +268,23 @@ mod tests {
         for i in 1..=n {
             simulation.add_party(Keygen::new(i, t, n).unwrap());
         }
-        let old_keys = simulation.run().unwrap();
+        let mut old_keys = simulation.run().unwrap();
 
         let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
+        let mut new_dks: Vec<DecryptionKey> = Vec::new();
+
         for i in 0..n as usize {
-            let (refresh_message, _new_dk) = RefreshMessage::distribute(&old_keys[i]);
+            let (refresh_message, new_dk) = RefreshMessage::distribute(&mut old_keys[i]);
             broadcast_vec.push(refresh_message);
+            new_dks.push(new_dk);
         }
+
         let mut new_keys: Vec<LocalKey> = Vec::new();
         for i in 0..n as usize {
-            new_keys.push(RefreshMessage::collect(&broadcast_vec, old_keys[i].clone()).expect(""));
+            new_keys.push(
+                RefreshMessage::collect(&broadcast_vec, old_keys[i].clone(), new_dks[i].clone())
+                    .expect(""),
+            );
         }
         // check that sum of old keys is equal to sum of new keys
         let old_linear_secret_key: Vec<_> = (0..old_keys.len())
