@@ -26,8 +26,8 @@ pub enum FsDkrError {
     #[error("Fairness proof verification failed.")]
     FairnessProof,
 
-    #[error("Duplicated refresh message found.")]
-    DuplicatedRefreshMessage,
+    #[error("Paillier verification proof failed for party {party_index:?}")]
+    PaillierVerificationError { party_index: usize },
 
     #[error("NotImplementedYet")]
     NotImplementedYet,
