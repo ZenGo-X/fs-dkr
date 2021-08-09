@@ -2,7 +2,7 @@
 
 
 ## Intro
-In this note we aim to re-purpose the [Fouque-Stern](https://hal.inria.fr/inria-00565274/document) Distributed Key Generation (DKG) to support a secure Distributed Key Refresh (DKR). As we claim, FS-DKR is well suited for rotation of [threshold ECDSA](https://eprint.iacr.org/2020/540.pdf) keys.
+We re-purpose the [Fouque-Stern](https://hal.inria.fr/inria-00565274/document) Distributed Key Generation (DKG) to support a secure Distributed Key Refresh (DKR). As we claim, FS-DKR is well suited for rotation of [threshold ECDSA](https://eprint.iacr.org/2020/540.pdf) keys.
 
 
 
