@@ -137,7 +137,6 @@ mod tests {
     use paillier::{
         EncryptWithChosenRandomness, KeyGeneration, Paillier, Randomness, RawPlaintext,
     };
-    use zeroize::Zeroize;
 
     #[test]
     fn test_fairness_proof() {

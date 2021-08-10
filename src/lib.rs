@@ -247,12 +247,20 @@ impl<P> RefreshMessage<P> {
 #[cfg(test)]
 mod tests {
     use crate::RefreshMessage;
+    use curv::arithmetic::Converter;
+    use curv::cryptographic_primitives::hashing::hash_sha256::HSha256;
+    use curv::cryptographic_primitives::hashing::traits::Hash;
     use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
         ShamirSecretSharing, VerifiableSS,
     };
     use curv::elliptic::curves::secp256_k1::GE;
+    use curv::BigInt;
+    use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::verify;
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{
-        Keygen,
+        Keygen, LocalKey,
+    };
+    use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{
+        CompletedOfflineStage, OfflineStage, SignManual,
     };
     use paillier::DecryptionKey;
     use round_based::dev::Simulation;
@@ -279,8 +287,10 @@ mod tests {
             new_dks.push(new_dk);
         }
 
+        // for testing:
         let old_keys = keys.clone();
 
+        // keys will be updated to refreshed values
         for i in 0..n as usize {
             RefreshMessage::collect(&broadcast_vec, &mut keys[i], new_dks[i].clone()).expect("");
         }
@@ -290,9 +300,8 @@ mod tests {
             .map(|i| old_keys[i].keys_linear.x_i)
             .collect();
 
-        let new_linear_secret_key: Vec<_> = (0..keys.len())
-            .map(|i| keys[i].keys_linear.x_i)
-            .collect();
+        let new_linear_secret_key: Vec<_> =
+            (0..keys.len()).map(|i| keys[i].keys_linear.x_i).collect();
         let indices: Vec<_> = (0..(t + 1) as usize).map(|i| i).collect();
         let vss = VerifiableSS::<GE> {
             parameters: ShamirSecretSharing {
@@ -306,6 +315,83 @@ mod tests {
             vss.reconstruct(&indices[..], &new_linear_secret_key[0..(t + 1) as usize])
         );
         assert_ne!(old_linear_secret_key, new_linear_secret_key);
-        // TODO: generate a signature and check it verifies with the same public  key
+    }
+
+    #[test]
+    fn test_sign_rotate_sign() {
+        let mut keys = simulate_keygen(2, 5);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
+        simulate_signing(offline_sign, b"ZenGo");
+        simulate_dkr(&mut keys);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
+        simulate_signing(offline_sign, b"ZenGo");
+    }
+
+    fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey> {
+        //simulate keygen
+        let mut simulation = Simulation::new();
+        simulation.enable_benchmarks(false);
+
+        for i in 1..=n {
+            simulation.add_party(Keygen::new(i, t, n).unwrap());
+        }
+        let keys = simulation.run().unwrap();
+        keys
+    }
+
+    fn simulate_dkr(keys: &mut Vec<LocalKey>) {
+        let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
+        let mut new_dks: Vec<DecryptionKey> = Vec::new();
+
+        for i in 0..keys.len() as usize {
+            let (refresh_message, new_dk) = RefreshMessage::distribute(&keys[i]);
+            broadcast_vec.push(refresh_message);
+            new_dks.push(new_dk);
+        }
+
+        // keys will be updated to refreshed values
+        for i in 0..keys.len() as usize {
+            RefreshMessage::collect(&broadcast_vec, &mut keys[i], new_dks[i].clone()).expect("");
+        }
+    }
+
+    fn simulate_offline_stage(
+        local_keys: Vec<LocalKey>,
+        s_l: &[u16],
+    ) -> Vec<CompletedOfflineStage> {
+        let mut simulation = Simulation::new();
+        simulation.enable_benchmarks(true);
+
+        for (i, &keygen_i) in (1..).zip(s_l) {
+            simulation.add_party(
+                OfflineStage::new(
+                    i,
+                    s_l.to_vec(),
+                    local_keys[usize::from(keygen_i - 1)].clone(),
+                )
+                .unwrap(),
+            );
+        }
+
+        let stages = simulation.run().unwrap();
+
+        stages
+    }
+
+    fn simulate_signing(offline: Vec<CompletedOfflineStage>, message: &[u8]) {
+        let message = HSha256::create_hash(&[&BigInt::from_bytes(message)]);
+        let pk = offline[0].public_key().clone();
+
+        let parties = offline
+            .iter()
+            .map(|o| SignManual::new(message.clone(), o.clone()))
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        let (parties, local_sigs): (Vec<_>, Vec<_>) = parties.into_iter().unzip();
+
+        assert!(parties
+            .into_iter()
+            .map(|p| p.complete(local_sigs.clone()).unwrap())
+            .all(|signature| verify(&signature, &pk, &message).is_ok()));
     }
 }
