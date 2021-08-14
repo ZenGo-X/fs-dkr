@@ -98,7 +98,7 @@ impl<P> RefreshMessage<P> {
         new_dk: DecryptionKey,
     ) -> FsDkrResult<()>
     where
-        P: ECPoint + Clone + Zeroize,
+        P: ECPoint + Clone + Zeroize + Debug,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
         // check we got at least threshold t refresh messages
@@ -176,18 +176,21 @@ impl<P> RefreshMessage<P> {
             .map(|i| refresh_messages[i].party_index - 1)
             .collect();
         // optimization - one decryption
-        let ciphertext_vec_at_indices_mapped: Vec<_> = (0..(local_key.t + 1) as usize)
+        let li_vec: Vec<_> = (0..local_key.t as usize + 1)
             .map(|i| {
-                let li = VerifiableSS::<P>::map_share_to_new_params(
+                VerifiableSS::<P>::map_share_to_new_params(
                     &local_key.vss_scheme.parameters,
                     indices[i],
                     &indices,
                 )
-                .to_big_int();
+            })
+            .collect();
+        let ciphertext_vec_at_indices_mapped: Vec<_> = (0..(local_key.t + 1) as usize)
+            .map(|i| {
                 Paillier::mul(
                     &local_key.paillier_key_vec[local_key.i as usize - 1],
                     RawCiphertext::from(ciphertext_vec[i].clone()),
-                    RawPlaintext::from(li),
+                    RawPlaintext::from(li_vec[i].to_big_int()),
                 )
             })
             .collect();
@@ -235,10 +238,19 @@ impl<P> RefreshMessage<P> {
 
         // update old key and output new key
         local_key.keys_linear.x_i.zeroize();
-        let mut new_key = local_key;
 
-        new_key.keys_linear.x_i = new_share_fe.clone();
-        new_key.keys_linear.y = P::generator() * new_share_fe.clone();
+        local_key.keys_linear.x_i = new_share_fe.clone();
+        local_key.keys_linear.y = P::generator() * new_share_fe.clone();
+
+        // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
+        for i in 0..local_key.n as usize {
+            local_key.pk_vec[i] =
+                refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone();
+            for j in 1..local_key.t as usize + 1 {
+                local_key.pk_vec[i] = local_key.pk_vec[i].clone()
+                    + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
+            }
+        }
 
         return Ok(());
     }
@@ -325,6 +337,9 @@ mod tests {
         simulate_dkr(&mut keys);
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
+        simulate_dkr(&mut keys);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 3, 5]);
+        simulate_signing(offline_sign, b"ZenGo");
     }
 
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey> {
@@ -360,7 +375,7 @@ mod tests {
         s_l: &[u16],
     ) -> Vec<CompletedOfflineStage> {
         let mut simulation = Simulation::new();
-        simulation.enable_benchmarks(true);
+        simulation.enable_benchmarks(false);
 
         for (i, &keygen_i) in (1..).zip(s_l) {
             simulation.add_party(
@@ -388,10 +403,20 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
         let (parties, local_sigs): (Vec<_>, Vec<_>) = parties.into_iter().unzip();
+        // parties.remove(0).complete(&local_sigs[1..]).unwrap();
+        let local_sigs_except = |i: usize| {
+            let mut v = vec![];
+            v.extend_from_slice(&local_sigs[..i]);
+            if i + 1 < local_sigs.len() {
+                v.extend_from_slice(&local_sigs[i + 1..]);
+            }
+            v
+        };
 
         assert!(parties
             .into_iter()
-            .map(|p| p.complete(local_sigs.clone()).unwrap())
+            .enumerate()
+            .map(|(i, p)| p.complete(&local_sigs_except(i)).unwrap())
             .all(|signature| verify(&signature, &pk, &message).is_ok()));
     }
 }

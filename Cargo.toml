@@ -20,7 +20,7 @@ default-features = false
 
 [dependencies.multi-party-ecdsa]
 git = "https://github.com/ZenGo-X/multi-party-ecdsa"
-tag = "v0.6.0"
+tag = "v0.7.1"
 default-features = false
 
 [dependencies]
