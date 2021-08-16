@@ -69,7 +69,7 @@ where
         .0
         .into_owned();
         let u_fe: P::Scalar = ECScalar::from(&u);
-        let T = P::generator() * u_fe.clone();
+        let T = P::generator() * u_fe;
 
         let e = HSha256::create_hash(&[
             &T.bytes_compressed_to_big_int(),
@@ -115,9 +115,9 @@ where
             .into_owned();
 
         let z_fe: P::Scalar = ECScalar::from(&self.z);
-        let z_G = P::generator() * z_fe.clone();
+        let z_G = P::generator() * z_fe;
         let e_fe: P::Scalar = ECScalar::from(&e);
-        let e_Y = statement.Y.clone() * e_fe.clone();
+        let e_Y = statement.Y.clone() * e_fe;
         let T_add_e_Y = e_Y + self.T.clone();
 
         match T_add_e_Y == z_G && e_u_add_c_e == enc_z_w {
@@ -147,13 +147,13 @@ mod tests {
 
         let c = Paillier::encrypt_with_chosen_randomness(
             &ek,
-            RawPlaintext::from(x_bn.clone()),
+            RawPlaintext::from(x_bn),
             &Randomness(r.clone()),
         )
         .0
         .into_owned();
 
-        let Y = GE::generator() * &x;
+        let Y = GE::generator() * x;
 
         let witness = FairnessWitness { x, r };
 
@@ -174,13 +174,13 @@ mod tests {
 
         let c = Paillier::encrypt_with_chosen_randomness(
             &ek,
-            RawPlaintext::from(x_bn.clone() + BigInt::one()),
+            RawPlaintext::from(x_bn + BigInt::one()),
             &Randomness(r.clone()),
         )
         .0
         .into_owned();
 
-        let Y = GE::generator() * &x;
+        let Y = GE::generator() * x;
 
         let witness = FairnessWitness { x, r };
 

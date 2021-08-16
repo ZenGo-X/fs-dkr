@@ -1,3 +1,8 @@
+#![cfg_attr(
+    feature = "cargo-clippy",
+    allow(clippy::many_single_char_names)
+)]
+
 mod error;
 mod proof_of_fairness;
 
@@ -49,7 +54,7 @@ impl<P> RefreshMessage<P> {
                 let randomness = BigInt::sample_below(&local_key.paillier_key_vec[i].n);
                 let ciphertext = Paillier::encrypt_with_chosen_randomness(
                     &local_key.paillier_key_vec[i],
-                    RawPlaintext::from(secret_shares[i].to_big_int().clone()),
+                    RawPlaintext::from(secret_shares[i].to_big_int()),
                     &Randomness::from(randomness.clone()),
                 )
                 .0
@@ -93,7 +98,7 @@ impl<P> RefreshMessage<P> {
 
     // TODO: change Vec<Self> to slice
     pub fn collect(
-        refresh_messages: &Vec<Self>,
+        refresh_messages: &[Self],
         mut local_key: &mut LocalKey<P>,
         new_dk: DecryptionKey,
     ) -> FsDkrResult<()>
@@ -112,10 +117,10 @@ impl<P> RefreshMessage<P> {
         // check all vectors are of same length
         let reference_len = refresh_messages[0].fairness_proof_vec.len();
 
-        for k in 0..refresh_messages.len() {
-            let fairness_proof_len = refresh_messages[k].fairness_proof_vec.len();
-            let points_commited_len = refresh_messages[k].points_committed_vec.len();
-            let points_encrypted_len = refresh_messages[k].points_encrypted_vec.len();
+        for (k, refresh_message) in refresh_messages.iter().enumerate() {
+            let fairness_proof_len = refresh_message.fairness_proof_vec.len();
+            let points_commited_len = refresh_message.points_committed_vec.len();
+            let points_encrypted_len = refresh_message.points_encrypted_vec.len();
 
             if !(fairness_proof_len == reference_len
                 && points_commited_len == reference_len
@@ -133,12 +138,12 @@ impl<P> RefreshMessage<P> {
         // TODO: for all parties: check that commitment to zero coefficient is the same as local public key
         // for each refresh message: check that SUM_j{i^j * C_j} = points_committed_vec[i] for all i
         // TODO: paralleize
-        for k in 0..refresh_messages.len() {
+        for refresh_message in refresh_messages.iter() {
             for i in 0..(local_key.n as usize) {
                 //TODO: we should handle the case of t<i<n
-                if refresh_messages[k]
+                if refresh_message
                     .coefficients_committed_vec
-                    .validate_share_public(&refresh_messages[k].points_committed_vec[i], i + 1)
+                    .validate_share_public(&refresh_message.points_committed_vec[i], i + 1)
                     .is_err()
                 {
                     return Err(FsDkrError::PublicShareValidationError);
@@ -148,15 +153,15 @@ impl<P> RefreshMessage<P> {
 
         // verify all  fairness proofs
         let mut statement: FairnessStatement<P>;
-        for k in 0..refresh_messages.len() {
+        for refresh_message in refresh_messages.iter() {
             for i in 0..(local_key.n as usize) {
                 //TODO: we should handle the case of t<i<n
                 statement = FairnessStatement {
                     ek: local_key.paillier_key_vec[i].clone(),
-                    c: refresh_messages[k].points_encrypted_vec[i].clone(),
-                    Y: refresh_messages[k].points_committed_vec[i].clone(),
+                    c: refresh_message.points_encrypted_vec[i].clone(),
+                    Y: refresh_message.points_committed_vec[i].clone(),
                 };
-                if refresh_messages[k].fairness_proof_vec[i]
+                if refresh_message.fairness_proof_vec[i]
                     .verify(&statement)
                     .is_err()
                 {
@@ -209,20 +214,20 @@ impl<P> RefreshMessage<P> {
             },
         );
 
-        for i in 0..refresh_messages.len() {
-            if refresh_messages[i]
+        for refresh_message in refresh_messages.iter() {
+            if refresh_message
                 .dk_correctness_proof
-                .verify(&refresh_messages[i].ek, SALT_STRING)
+                .verify(&refresh_message.ek, SALT_STRING)
                 .is_err()
             {
                 return Err(FsDkrError::PaillierVerificationError {
-                    party_index: refresh_messages[i].party_index,
+                    party_index: refresh_message.party_index,
                 });
             }
 
             // if the proof checks, we add the new paillier public key to the key
-            local_key.paillier_key_vec[refresh_messages[i].party_index - 1] =
-                refresh_messages[i].ek.clone();
+            local_key.paillier_key_vec[refresh_message.party_index - 1] =
+                refresh_message.ek.clone();
         }
 
         let new_share = Paillier::decrypt(&local_key.paillier_dk, cipher_text_sum)
@@ -240,7 +245,7 @@ impl<P> RefreshMessage<P> {
         local_key.keys_linear.x_i.zeroize();
 
         local_key.keys_linear.x_i = new_share_fe.clone();
-        local_key.keys_linear.y = P::generator() * new_share_fe.clone();
+        local_key.keys_linear.y = P::generator() * new_share_fe;
 
         // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
         for i in 0..local_key.n as usize {
@@ -252,7 +257,7 @@ impl<P> RefreshMessage<P> {
             }
         }
 
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -293,8 +298,8 @@ mod tests {
         let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
         let mut new_dks: Vec<DecryptionKey> = Vec::new();
 
-        for i in 0..n as usize {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(&keys[i]);
+        for key in keys.iter() {
+            let (refresh_message, new_dk) = RefreshMessage::distribute(key);
             broadcast_vec.push(refresh_message);
             new_dks.push(new_dk);
         }
@@ -314,7 +319,7 @@ mod tests {
 
         let new_linear_secret_key: Vec<_> =
             (0..keys.len()).map(|i| keys[i].keys_linear.x_i).collect();
-        let indices: Vec<_> = (0..(t + 1) as usize).map(|i| i).collect();
+        let indices: Vec<_> = (0..(t + 1) as usize).collect();
         let vss = VerifiableSS::<GE> {
             parameters: ShamirSecretSharing {
                 threshold: t as usize,
@@ -338,7 +343,7 @@ mod tests {
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
         simulate_dkr(&mut keys);
-        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 3, 5]);
+        let offline_sign = simulate_offline_stage(keys, &[1, 3, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
@@ -350,16 +355,16 @@ mod tests {
         for i in 1..=n {
             simulation.add_party(Keygen::new(i, t, n).unwrap());
         }
-        let keys = simulation.run().unwrap();
-        keys
+
+        simulation.run().unwrap()
     }
 
     fn simulate_dkr(keys: &mut Vec<LocalKey>) {
         let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
         let mut new_dks: Vec<DecryptionKey> = Vec::new();
 
-        for i in 0..keys.len() as usize {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(&keys[i]);
+        for key in keys.iter() {
+            let (refresh_message, new_dk) = RefreshMessage::distribute(key);
             broadcast_vec.push(refresh_message);
             new_dks.push(new_dk);
         }
@@ -388,14 +393,12 @@ mod tests {
             );
         }
 
-        let stages = simulation.run().unwrap();
-
-        stages
+        simulation.run().unwrap()
     }
 
     fn simulate_signing(offline: Vec<CompletedOfflineStage>, message: &[u8]) {
         let message = HSha256::create_hash(&[&BigInt::from_bytes(message)]);
-        let pk = offline[0].public_key().clone();
+        let pk = *offline[0].public_key();
 
         let parties = offline
             .iter()
