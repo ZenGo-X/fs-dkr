@@ -61,4 +61,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warningsn 1 --suppress-no-test-exit-code --durations=50
+          args: -- -D warningsn 1  --durations=50
