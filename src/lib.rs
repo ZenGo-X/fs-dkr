@@ -28,6 +28,7 @@ pub struct RefreshMessage<P> {
     points_encrypted_vec: Vec<BigInt>,
     dk_correctness_proof: NICorrectKeyProof,
     ek: EncryptionKey,
+    remove_party_index: Option<usize>,
 }
 
 impl<P> RefreshMessage<P> {
@@ -88,6 +89,7 @@ impl<P> RefreshMessage<P> {
                 points_encrypted_vec,
                 dk_correctness_proof,
                 ek,
+                remove_party_index: None,
             },
             dk,
         )
@@ -256,6 +258,39 @@ impl<P> RefreshMessage<P> {
 
         Ok(())
     }
+
+    pub fn check_remove_majority(refresh_messages: &[Self]) -> Option<usize> {
+        let mut proposed_parties: Vec<usize> = Vec::new();
+
+        for refresh_message in refresh_messages.iter() {
+            if refresh_message.remove_party_index.is_some() {
+                proposed_parties.push(refresh_message.remove_party_index.unwrap());
+            }
+        }
+
+        for proposed_party in proposed_parties.into_iter() {
+            let mut remove_party: bool = true;
+            for refresh_message in refresh_messages.iter() {
+                if refresh_message.party_index == proposed_party {
+                    continue;
+                }
+
+                let vote_for_current_party = refresh_message
+                    .remove_party_index
+                    .map(|vote| vote != proposed_party);
+
+                if vote_for_current_party.is_none() {
+                    remove_party = false;
+                    break;
+                }
+            }
+
+            if remove_party {
+                return Some(proposed_party);
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -282,32 +317,12 @@ mod tests {
     #[test]
     fn test1() {
         //simulate keygen
-        let mut simulation = Simulation::new();
-        simulation.enable_benchmarks(false);
-
         let t = 3;
         let n = 5;
-        for i in 1..=n {
-            simulation.add_party(Keygen::new(i, t, n).unwrap());
-        }
-        let mut keys = simulation.run().unwrap();
+        let mut keys = simulate_keygen(t, n);
 
-        let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
-        let mut new_dks: Vec<DecryptionKey> = Vec::new();
-
-        for key in keys.iter() {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(key);
-            broadcast_vec.push(refresh_message);
-            new_dks.push(new_dk);
-        }
-
-        // for testing:
         let old_keys = keys.clone();
-
-        // keys will be updated to refreshed values
-        for i in 0..n as usize {
-            RefreshMessage::collect(&broadcast_vec, &mut keys[i], new_dks[i].clone()).expect("");
-        }
+        simulate_dkr(&mut keys);
 
         // check that sum of old keys is equal to sum of new keys
         let old_linear_secret_key: Vec<_> = (0..old_keys.len())
@@ -344,6 +359,14 @@ mod tests {
         simulate_signing(offline_sign, b"ZenGo");
     }
 
+    #[test]
+    fn test_remove() {
+        let t = 2;
+        let n = 5;
+        let mut keys = simulate_keygen(t, n);
+        simulate_dkr_removal(&mut keys, 1, true);
+    }
+
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey> {
         //simulate keygen
         let mut simulation = Simulation::new();
@@ -356,7 +379,64 @@ mod tests {
         simulation.run().unwrap()
     }
 
-    fn simulate_dkr(keys: &mut Vec<LocalKey>) {
+    fn simulate_dkr_removal(
+        keys: &mut Vec<LocalKey>,
+        remove_party_index: usize,
+        majority: bool,
+    ) -> (Vec<Vec<RefreshMessage<GE>>>, Vec<DecryptionKey>) {
+        let mut broadcast_matrix: Vec<Vec<RefreshMessage<GE>>> =
+            (0..keys.len()).map(|_| Vec::new()).collect();
+        let mut new_dks: Vec<DecryptionKey> = Vec::new();
+
+        for key in keys.iter() {
+            let (mut refresh_message, new_dk) = RefreshMessage::distribute(key);
+            new_dks.push(new_dk);
+
+            if refresh_message.party_index != remove_party_index {
+                refresh_message.remove_party_index = Some(remove_party_index);
+            }
+
+            for (j, refresh_bucket) in broadcast_matrix.iter_mut().enumerate() {
+                if refresh_message.remove_party_index.is_some() && remove_party_index - 1 == j {
+                    continue;
+                }
+                refresh_bucket.push(refresh_message.clone());
+            }
+        }
+
+        if majority {
+            assert_eq!(broadcast_matrix[remove_party_index - 1].len(), 1);
+
+            // keys will be updated to refreshed values
+            for i in 0..keys.len() as usize {
+                if i == remove_party_index - 1 {
+                    continue;
+                }
+
+                RefreshMessage::collect(&broadcast_matrix[i], &mut keys[i], new_dks[i].clone())
+                    .expect("");
+                let check_majority =
+                    RefreshMessage::check_remove_majority(&broadcast_matrix[i].clone());
+                assert!(check_majority.is_some());
+
+                let voted_removed_party = check_majority.unwrap();
+                assert_eq!(remove_party_index, voted_removed_party);
+            }
+
+            let result = RefreshMessage::collect(
+                &broadcast_matrix[remove_party_index - 1],
+                &mut keys[remove_party_index - 1],
+                new_dks[remove_party_index - 1].clone(),
+            );
+            assert!(result.is_err());
+        } else {
+            // TODO
+        }
+
+        (broadcast_matrix, new_dks)
+    }
+
+    fn simulate_dkr(keys: &mut Vec<LocalKey>) -> (Vec<RefreshMessage<GE>>, Vec<DecryptionKey>) {
         let mut broadcast_vec: Vec<RefreshMessage<GE>> = Vec::new();
         let mut new_dks: Vec<DecryptionKey> = Vec::new();
 
@@ -370,6 +450,8 @@ mod tests {
         for i in 0..keys.len() as usize {
             RefreshMessage::collect(&broadcast_vec, &mut keys[i], new_dks[i].clone()).expect("");
         }
+
+        (broadcast_vec, new_dks)
     }
 
     fn simulate_offline_stage(
