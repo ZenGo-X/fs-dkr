@@ -28,7 +28,7 @@ pub struct RefreshMessage<P> {
     points_encrypted_vec: Vec<BigInt>,
     dk_correctness_proof: NICorrectKeyProof,
     ek: EncryptionKey,
-    remove_party_index: Option<usize>,
+    remove_party_indexes: Vec<usize>,
 }
 
 impl<P> RefreshMessage<P> {
@@ -89,7 +89,7 @@ impl<P> RefreshMessage<P> {
                 points_encrypted_vec,
                 dk_correctness_proof,
                 ek,
-                remove_party_index: None,
+                remove_party_indexes: Vec::new(),
             },
             dk,
         )
@@ -332,11 +332,11 @@ mod tests {
         let mut keys = simulate_keygen(2, 5);
         let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
         simulate_signing(offline_sign, b"ZenGo");
-        simulate_dkr_removal(&mut keys, 1);
+        simulate_dkr_removal(&mut keys, [1].to_vec());
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
-        simulate_dkr_removal(&mut keys, 2);
-        let offline_sign = simulate_offline_stage(keys, &[3, 4, 5]);
+        simulate_dkr_removal(&mut keys, [1, 2].to_vec());
+        let offline_sign = simulate_offline_stage(keys.clone(), &[3, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
@@ -354,7 +354,7 @@ mod tests {
 
     fn simulate_dkr_removal(
         keys: &mut Vec<LocalKey>,
-        remove_party_index: usize,
+        remove_party_indexes: Vec<usize>,
     ) {
         let mut broadcast_messages: HashMap<usize, Vec<RefreshMessage<GE>>> = HashMap::new();
         let mut new_dks: HashMap<usize, DecryptionKey> = HashMap::new();
@@ -373,23 +373,29 @@ mod tests {
        }
 
         for refresh_message in refresh_messages.iter_mut() {
-            if refresh_message.party_index != remove_party_index {
-                refresh_message.remove_party_index = Some(remove_party_index);
+            if !remove_party_indexes.contains(&refresh_message.party_index) {
+                refresh_message.remove_party_indexes = remove_party_indexes.clone();
+            } else {
+                let mut new_remove_party_indexes = remove_party_indexes.clone();
+                new_remove_party_indexes.retain(|value| *value != refresh_message.party_index);
+                refresh_message.remove_party_indexes = new_remove_party_indexes;
             }
 
             for (party_index, refresh_bucket) in broadcast_messages.iter_mut() {
-                if refresh_message.remove_party_index.is_some() && remove_party_index == *party_index {
+                if refresh_message.remove_party_indexes.contains(party_index) {
                     continue;
                 }
                 refresh_bucket.push(refresh_message.clone());
             }
         }
 
-        assert_eq!(broadcast_messages[&remove_party_index].len(), 1);
+        for remove_party_index in remove_party_indexes.iter() {
+            assert_eq!(broadcast_messages[&remove_party_index].len(), 1);
+        }
 
         // keys will be updated to refreshed values
         for (party, key) in party_key.iter_mut() {
-            if *party == remove_party_index {
+            if remove_party_indexes.contains(party) {
                 continue;
             }
 
@@ -397,12 +403,14 @@ mod tests {
                 .expect("");
         }
 
-        let result = RefreshMessage::collect(
-            &broadcast_messages[&remove_party_index],
-            &mut keys[remove_party_index],
-            new_dks[&remove_party_index].clone(),
-        );
-        assert!(result.is_err());
+        for remove_party_index in remove_party_indexes {
+            let result = RefreshMessage::collect(
+                &broadcast_messages[&remove_party_index],
+                &mut keys[remove_party_index],
+                new_dks[&remove_party_index].clone(),
+            );
+            assert!(result.is_err());
+        }
     }
 
     fn simulate_dkr(keys: &mut Vec<LocalKey>) -> (Vec<RefreshMessage<GE>>, Vec<DecryptionKey>) {
