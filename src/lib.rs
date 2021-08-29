@@ -258,39 +258,6 @@ impl<P> RefreshMessage<P> {
 
         Ok(())
     }
-
-    pub fn check_remove_majority(refresh_messages: &[Self]) -> Option<usize> {
-        let mut proposed_parties: Vec<usize> = Vec::new();
-
-        for refresh_message in refresh_messages.iter() {
-            if refresh_message.remove_party_index.is_some() {
-                proposed_parties.push(refresh_message.remove_party_index.unwrap());
-            }
-        }
-
-        for proposed_party in proposed_parties.into_iter() {
-            let mut remove_party: bool = true;
-            for refresh_message in refresh_messages.iter() {
-                if refresh_message.party_index == proposed_party {
-                    continue;
-                }
-
-                let vote_for_current_party = refresh_message
-                    .remove_party_index
-                    .map(|vote| vote != proposed_party);
-
-                if vote_for_current_party.is_none() {
-                    remove_party = false;
-                    break;
-                }
-            }
-
-            if remove_party {
-                return Some(proposed_party);
-            }
-        }
-        None
-    }
 }
 
 #[cfg(test)]
@@ -360,11 +327,16 @@ mod tests {
     }
 
     #[test]
-    fn test_remove() {
-        let t = 2;
-        let n = 5;
-        let mut keys = simulate_keygen(t, n);
-        simulate_dkr_removal(&mut keys, 1, true);
+    fn test_remove_sign_rotate_sign() {
+        let mut keys = simulate_keygen(2, 5);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
+        simulate_signing(offline_sign, b"ZenGo");
+        simulate_dkr_removal(&mut keys, 1);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
+        simulate_signing(offline_sign, b"ZenGo");
+        simulate_dkr_removal(&mut keys, 2);
+        let offline_sign = simulate_offline_stage(keys, &[1, 3, 5]);
+        simulate_signing(offline_sign, b"ZenGo");
     }
 
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey> {
@@ -382,7 +354,6 @@ mod tests {
     fn simulate_dkr_removal(
         keys: &mut Vec<LocalKey>,
         remove_party_index: usize,
-        majority: bool,
     ) -> (Vec<Vec<RefreshMessage<GE>>>, Vec<DecryptionKey>) {
         let mut broadcast_matrix: Vec<Vec<RefreshMessage<GE>>> =
             (0..keys.len()).map(|_| Vec::new()).collect();
@@ -404,34 +375,30 @@ mod tests {
             }
         }
 
-        if majority {
             assert_eq!(broadcast_matrix[remove_party_index - 1].len(), 1);
 
-            // keys will be updated to refreshed values
-            for i in 0..keys.len() as usize {
-                if i == remove_party_index - 1 {
-                    continue;
-                }
-
-                RefreshMessage::collect(&broadcast_matrix[i], &mut keys[i], new_dks[i].clone())
-                    .expect("");
-                let check_majority =
-                    RefreshMessage::check_remove_majority(&broadcast_matrix[i].clone());
-                assert!(check_majority.is_some());
-
-                let voted_removed_party = check_majority.unwrap();
-                assert_eq!(remove_party_index, voted_removed_party);
+        // keys will be updated to refreshed values
+        for i in 0..keys.len() as usize {
+            if i == remove_party_index - 1 {
+                continue;
             }
 
-            let result = RefreshMessage::collect(
-                &broadcast_matrix[remove_party_index - 1],
-                &mut keys[remove_party_index - 1],
-                new_dks[remove_party_index - 1].clone(),
-            );
-            assert!(result.is_err());
-        } else {
-            // TODO
+            RefreshMessage::collect(&broadcast_matrix[i], &mut keys[i], new_dks[i].clone())
+                .expect("");
+            let check_majority =
+                RefreshMessage::check_remove_majority(&broadcast_matrix[i].clone());
+            assert!(check_majority.is_some());
+
+            let voted_removed_party = check_majority.unwrap();
+            assert_eq!(remove_party_index, voted_removed_party);
         }
+
+        let result = RefreshMessage::collect(
+            &broadcast_matrix[remove_party_index - 1],
+            &mut keys[remove_party_index - 1],
+            new_dks[remove_party_index - 1].clone(),
+        );
+        assert!(result.is_err());
 
         (broadcast_matrix, new_dks)
     }
