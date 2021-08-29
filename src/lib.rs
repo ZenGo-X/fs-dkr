@@ -336,7 +336,7 @@ mod tests {
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
         simulate_dkr_removal(&mut keys, [1, 2].to_vec());
-        let offline_sign = simulate_offline_stage(keys.clone(), &[3, 4, 5]);
+        let offline_sign = simulate_offline_stage(keys, &[3, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
@@ -352,10 +352,7 @@ mod tests {
         simulation.run().unwrap()
     }
 
-    fn simulate_dkr_removal(
-        keys: &mut Vec<LocalKey>,
-        remove_party_indexes: Vec<usize>,
-    ) {
+    fn simulate_dkr_removal(keys: &mut Vec<LocalKey>, remove_party_indexes: Vec<usize>) {
         let mut broadcast_messages: HashMap<usize, Vec<RefreshMessage<GE>>> = HashMap::new();
         let mut new_dks: HashMap<usize, DecryptionKey> = HashMap::new();
         let mut refresh_messages: Vec<RefreshMessage<GE>> = Vec::new();
@@ -364,13 +361,13 @@ mod tests {
         for key in keys.iter_mut() {
             let (refresh_message, new_dk) = RefreshMessage::distribute(key);
             refresh_messages.push(refresh_message.clone());
-            new_dks.insert(refresh_message.party_index.clone(), new_dk);
-            party_key.insert(refresh_message.party_index.clone(), key.clone());
+            new_dks.insert(refresh_message.party_index, new_dk);
+            party_key.insert(refresh_message.party_index, key.clone());
         }
 
-       for refresh_message in refresh_messages.iter() {
-           broadcast_messages.insert(refresh_message.party_index, Vec::new());
-       }
+        for refresh_message in refresh_messages.iter() {
+            broadcast_messages.insert(refresh_message.party_index, Vec::new());
+        }
 
         for refresh_message in refresh_messages.iter_mut() {
             if !remove_party_indexes.contains(&refresh_message.party_index) {
@@ -390,7 +387,7 @@ mod tests {
         }
 
         for remove_party_index in remove_party_indexes.iter() {
-            assert_eq!(broadcast_messages[&remove_party_index].len(), 1);
+            assert_eq!(broadcast_messages[remove_party_index].len(), 1);
         }
 
         // keys will be updated to refreshed values
@@ -399,8 +396,12 @@ mod tests {
                 continue;
             }
 
-            RefreshMessage::collect(broadcast_messages[party].clone().as_slice(), key, new_dks[party].clone())
-                .expect("");
+            RefreshMessage::collect(
+                broadcast_messages[party].clone().as_slice(),
+                key,
+                new_dks[party].clone(),
+            )
+            .expect("");
         }
 
         for remove_party_index in remove_party_indexes {
