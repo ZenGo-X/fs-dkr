@@ -271,18 +271,26 @@ mod tests {
     use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
         ShamirSecretSharing, VerifiableSS,
     };
+    use curv::elliptic::curves::p256::FE;
     use curv::elliptic::curves::secp256_k1::GE;
     use curv::BigInt;
-    use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::verify;
+    use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::{verify, SharedKeys};
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{
         Keygen, LocalKey,
     };
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{
         CompletedOfflineStage, OfflineStage, SignManual,
     };
-    use paillier::DecryptionKey;
+    use paillier::{
+        Add, Decrypt, DecryptionKey, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
+        KeyGeneration, Mul, Paillier, Randomness, RawCiphertext, RawPlaintext,
+    };
     use round_based::dev::Simulation;
     use std::collections::HashMap;
+    use std::fmt::Debug;
+    use zeroize::Zeroize;
+    use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
+    use curv::elliptic::curves::traits::ECScalar;
 
     #[test]
     fn test1() {
@@ -330,6 +338,31 @@ mod tests {
     }
 
     #[test]
+    fn test_add_sign_rotate_sign() {
+        let t = 2;
+        let n = 7;
+
+        let mut all_keys = simulate_keygen(t, n);
+        let mut keys = all_keys[0..5].to_vec();
+        let mut holdout_keys = all_keys[5..].to_vec();
+
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
+        simulate_signing(offline_sign, b"ZenGo");
+
+        simulate_dkr(&mut keys);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
+        simulate_signing(offline_sign, b"ZenGo");
+
+        simulate_dkr(&mut keys);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 3, 5]);
+        simulate_signing(offline_sign, b"ZenGo");
+
+        let fullset = simulate_dkr_add(keys, t, n);
+        let offline_sign = simulate_offline_stage(fullset.clone(), &[1, 6, 7]);
+        simulate_signing(offline_sign, b"ZenGo");
+    }
+
+    #[test]
     fn test_remove_sign_rotate_sign() {
         let mut keys = simulate_keygen(2, 5);
         let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
@@ -340,6 +373,33 @@ mod tests {
         simulate_dkr_removal(&mut keys, [1, 2].to_vec());
         let offline_sign = simulate_offline_stage(keys, &[3, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
+    }
+
+    fn simulate_dkr_add(mut keys: Vec<LocalKey>, t: u16, n: u16) -> Vec<LocalKey> {
+        let (ek, dk) = Paillier::keypair().keys();
+        let dk_correctness_proof = NICorrectKeyProof::proof(&dk, None);
+
+        let new_local_key = LocalKey {
+            paillier_dk: dk,
+            pk_vec: vec![],
+            keys_linear: keys[0].keys_linear.clone(),
+            paillier_key_vec: vec![],
+            y_sum_s: keys[0].y_sum_s.clone(),
+            h1_h2_n_tilde_vec: vec![],
+            vss_scheme: VerifiableSS {
+                parameters: ShamirSecretSharing {
+                    threshold: t as usize,
+                    share_count: n as usize,
+                },
+                commitments: Vec::new(),
+            },
+            i: 0,
+            t ,
+            n,
+        };
+
+        keys.push(new_local_key);
+        keys
     }
 
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey> {
