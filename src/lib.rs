@@ -280,6 +280,7 @@ mod tests {
     };
     use paillier::DecryptionKey;
     use round_based::dev::Simulation;
+    use std::collections::HashMap;
 
     #[test]
     fn test1() {
@@ -335,7 +336,7 @@ mod tests {
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
         simulate_dkr_removal(&mut keys, 2);
-        let offline_sign = simulate_offline_stage(keys, &[1, 3, 5]);
+        let offline_sign = simulate_offline_stage(keys, &[3, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
@@ -354,53 +355,54 @@ mod tests {
     fn simulate_dkr_removal(
         keys: &mut Vec<LocalKey>,
         remove_party_index: usize,
-    ) -> (Vec<Vec<RefreshMessage<GE>>>, Vec<DecryptionKey>) {
-        let mut broadcast_matrix: Vec<Vec<RefreshMessage<GE>>> =
-            (0..keys.len()).map(|_| Vec::new()).collect();
-        let mut new_dks: Vec<DecryptionKey> = Vec::new();
+    ) {
+        let mut broadcast_messages: HashMap<usize, Vec<RefreshMessage<GE>>> = HashMap::new();
+        let mut new_dks: HashMap<usize, DecryptionKey> = HashMap::new();
+        let mut refresh_messages: Vec<RefreshMessage<GE>> = Vec::new();
+        let mut party_key: HashMap<usize, LocalKey> = HashMap::new();
 
-        for key in keys.iter() {
-            let (mut refresh_message, new_dk) = RefreshMessage::distribute(key);
-            new_dks.push(new_dk);
+        for key in keys.iter_mut() {
+            let (refresh_message, new_dk) = RefreshMessage::distribute(key);
+            refresh_messages.push(refresh_message.clone());
+            new_dks.insert(refresh_message.party_index.clone(), new_dk);
+            party_key.insert(refresh_message.party_index.clone(), key.clone());
+        }
 
+       for refresh_message in refresh_messages.iter() {
+           broadcast_messages.insert(refresh_message.party_index, Vec::new());
+       }
+
+        for refresh_message in refresh_messages.iter_mut() {
             if refresh_message.party_index != remove_party_index {
                 refresh_message.remove_party_index = Some(remove_party_index);
             }
 
-            for (j, refresh_bucket) in broadcast_matrix.iter_mut().enumerate() {
-                if refresh_message.remove_party_index.is_some() && remove_party_index - 1 == j {
+            for (party_index, refresh_bucket) in broadcast_messages.iter_mut() {
+                if refresh_message.remove_party_index.is_some() && remove_party_index == *party_index {
                     continue;
                 }
                 refresh_bucket.push(refresh_message.clone());
             }
         }
 
-            assert_eq!(broadcast_matrix[remove_party_index - 1].len(), 1);
+        assert_eq!(broadcast_messages[&remove_party_index].len(), 1);
 
         // keys will be updated to refreshed values
-        for i in 0..keys.len() as usize {
-            if i == remove_party_index - 1 {
+        for (party, key) in party_key.iter_mut() {
+            if *party == remove_party_index {
                 continue;
             }
 
-            RefreshMessage::collect(&broadcast_matrix[i], &mut keys[i], new_dks[i].clone())
+            RefreshMessage::collect(broadcast_messages[party].clone().as_slice(), key, new_dks[party].clone())
                 .expect("");
-            let check_majority =
-                RefreshMessage::check_remove_majority(&broadcast_matrix[i].clone());
-            assert!(check_majority.is_some());
-
-            let voted_removed_party = check_majority.unwrap();
-            assert_eq!(remove_party_index, voted_removed_party);
         }
 
         let result = RefreshMessage::collect(
-            &broadcast_matrix[remove_party_index - 1],
-            &mut keys[remove_party_index - 1],
-            new_dks[remove_party_index - 1].clone(),
+            &broadcast_messages[&remove_party_index],
+            &mut keys[remove_party_index],
+            new_dks[&remove_party_index].clone(),
         );
         assert!(result.is_err());
-
-        (broadcast_matrix, new_dks)
     }
 
     fn simulate_dkr(keys: &mut Vec<LocalKey>) -> (Vec<RefreshMessage<GE>>, Vec<DecryptionKey>) {
