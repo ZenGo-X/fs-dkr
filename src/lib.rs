@@ -10,16 +10,18 @@ use curv::cryptographic_primitives::secret_sharing::feldman_vss::VerifiableSS;
 use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
+pub use paillier::DecryptionKey;
 use paillier::{
-    Add, Decrypt, DecryptionKey, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
+    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
     KeyGeneration, Mul, Paillier, Randomness, RawCiphertext, RawPlaintext,
 };
 use std::fmt::Debug;
 use zeroize::Zeroize;
 use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
+use serde::{Deserialize, Serialize};
 
 // Everything here can be broadcasted
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct RefreshMessage<P> {
     party_index: usize,
     fairness_proof_vec: Vec<FairnessProof<P>>,
