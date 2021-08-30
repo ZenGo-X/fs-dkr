@@ -11,15 +11,17 @@ use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
 use paillier::{
-    Add, Decrypt, DecryptionKey, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
+    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
     KeyGeneration, Mul, Paillier, Randomness, RawCiphertext, RawPlaintext,
 };
+pub use paillier::DecryptionKey;
+use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use zeroize::Zeroize;
 use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
 
 // Everything here can be broadcasted
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct RefreshMessage<P> {
     party_index: usize,
     fairness_proof_vec: Vec<FairnessProof<P>>,
