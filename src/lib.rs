@@ -35,7 +35,7 @@ pub struct RefreshMessage<P> {
     points_encrypted_vec: Vec<BigInt>,
     dk_correctness_proof: NICorrectKeyProof,
     ek: EncryptionKey,
-    remove_party_indexes: Vec<usize>,
+    remove_party_indices: Vec<usize>,
     new_party: bool,
 }
 
@@ -60,7 +60,7 @@ impl<P> RefreshMessage<P> {
             points_encrypted_vec: Vec::new(),
             dk_correctness_proof: NICorrectKeyProof::proof(&new_party_key.dk, None),
             ek: new_party_key.ek.clone(),
-            remove_party_indexes: Vec::new(),
+            remove_party_indices: Vec::new(),
             new_party: true,
         };
 
@@ -125,7 +125,7 @@ impl<P> RefreshMessage<P> {
                 points_encrypted_vec,
                 dk_correctness_proof,
                 ek,
-                remove_party_indexes: Vec::new(),
+                remove_party_indices: Vec::new(),
                 new_party: false,
             },
             dk,

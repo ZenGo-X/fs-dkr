@@ -175,7 +175,7 @@ mod tests {
         simulation.run().unwrap()
     }
 
-    fn simulate_dkr_removal(keys: &mut Vec<LocalKey>, remove_party_indexes: Vec<usize>) {
+    fn simulate_dkr_removal(keys: &mut Vec<LocalKey>, remove_party_indices: Vec<usize>) {
         let mut broadcast_messages: HashMap<usize, Vec<RefreshMessage<GE>>> = HashMap::new();
         let mut new_dks: HashMap<usize, DecryptionKey> = HashMap::new();
         let mut refresh_messages: Vec<RefreshMessage<GE>> = Vec::new();
@@ -193,29 +193,29 @@ mod tests {
         }
 
         for refresh_message in refresh_messages.iter_mut() {
-            if !remove_party_indexes.contains(&refresh_message.party_index) {
-                refresh_message.remove_party_indexes = remove_party_indexes.clone();
+            if !remove_party_indices.contains(&refresh_message.party_index) {
+                refresh_message.remove_party_indices = remove_party_indices.clone();
             } else {
-                let mut new_remove_party_indexes = remove_party_indexes.clone();
-                new_remove_party_indexes.retain(|value| *value != refresh_message.party_index);
-                refresh_message.remove_party_indexes = new_remove_party_indexes;
+                let mut new_remove_party_indices = remove_party_indices.clone();
+                new_remove_party_indices.retain(|value| *value != refresh_message.party_index);
+                refresh_message.remove_party_indices = new_remove_party_indices;
             }
 
             for (party_index, refresh_bucket) in broadcast_messages.iter_mut() {
-                if refresh_message.remove_party_indexes.contains(party_index) {
+                if refresh_message.remove_party_indices.contains(party_index) {
                     continue;
                 }
                 refresh_bucket.push(refresh_message.clone());
             }
         }
 
-        for remove_party_index in remove_party_indexes.iter() {
+        for remove_party_index in remove_party_indices.iter() {
             assert_eq!(broadcast_messages[remove_party_index].len(), 1);
         }
 
         // keys will be updated to refreshed values
         for (party, key) in party_key.iter_mut() {
-            if remove_party_indexes.contains(party) {
+            if remove_party_indices.contains(party) {
                 continue;
             }
 
@@ -228,7 +228,7 @@ mod tests {
             .expect("");
         }
 
-        for remove_party_index in remove_party_indexes {
+        for remove_party_index in remove_party_indices {
             let result = RefreshMessage::collect(
                 &broadcast_messages[&remove_party_index],
                 &mut keys[remove_party_index],
