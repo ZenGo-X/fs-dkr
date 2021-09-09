@@ -14,11 +14,11 @@ use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::Keys;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
-use paillier::{
-    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, EncryptionKey,
-    KeyGeneration, Mul, Paillier, Randomness, RawCiphertext, RawPlaintext,
-};
 pub use paillier::DecryptionKey;
+use paillier::{
+    Add, Decrypt, Encrypt, EncryptWithChosenRandomness, EncryptionKey, KeyGeneration, Mul,
+    Paillier, Randomness, RawCiphertext, RawPlaintext,
+};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
@@ -213,7 +213,13 @@ impl<P> RefreshMessage<P> {
             share_count: n,
         };
 
-        let (cipher_text_sum, li_vec) = RefreshMessage::get_ciphertext_sum(refresh_messages, party_index, &parameters, new_parties, &paillier_key.ek);
+        let (cipher_text_sum, li_vec) = RefreshMessage::get_ciphertext_sum(
+            refresh_messages,
+            party_index,
+            &parameters,
+            new_parties,
+            &paillier_key.ek,
+        );
         let new_share = Paillier::decrypt(&paillier_key.dk, cipher_text_sum)
             .0
             .into_owned();
@@ -261,12 +267,19 @@ impl<P> RefreshMessage<P> {
         //decrypt the new share
         // we first homomorphically add all ciphertext encrypted using our encryption key
         let ciphertext_vec: Vec<_> = (0..refresh_messages.len())
-            .filter_map(|k|
-                if refresh_messages[k].new_party && new_parties.contains(&refresh_messages[k].party_index) {
+            .filter_map(|k| {
+                if refresh_messages[k].new_party
+                    && new_parties.contains(&refresh_messages[k].party_index)
+                {
                     None
                 } else {
-                    Some(refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize].clone())
-                }).collect();
+                    Some(
+                        refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize]
+                            .clone(),
+                    )
+                }
+            })
+            .collect();
 
         let indices: Vec<_> = (0..(parameters.threshold + 1) as usize)
             .map(|i| refresh_messages[i].party_index - 1)
@@ -326,7 +339,6 @@ impl<P> RefreshMessage<P> {
             &local_key.vss_scheme.parameters,
             new_parties,
             &old_ek,
-
         );
 
         for refresh_message in refresh_messages.iter() {
