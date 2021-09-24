@@ -13,6 +13,7 @@ use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
 use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::Keys;
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SharedKeys;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
 pub use paillier::DecryptionKey;
 use paillier::{
@@ -21,6 +22,7 @@ use paillier::{
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use zeroize::Zeroize;
 use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
@@ -40,14 +42,17 @@ pub struct RefreshMessage<P> {
 }
 
 impl<P> RefreshMessage<P> {
-    pub fn distribute_new_party(party_index: usize, t: usize, n: usize) -> (Self, Keys)
+    pub fn distribute_new_party(t: usize, n: usize) -> (Self, Keys)
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        let new_party_key = Keys::create(0);
+        // the new party does not know yet what index will it receive at this point.
+        let default_index = 0;
+
+        let new_party_key = Keys::create(default_index);
         let refresh_message = RefreshMessage {
-            party_index: party_index,
+            party_index: default_index,
             fairness_proof_vec: Vec::new(),
             coefficients_committed_vec: VerifiableSS {
                 parameters: ShamirSecretSharing {
@@ -154,6 +159,10 @@ impl<P> RefreshMessage<P> {
         let reference_len = refresh_messages[0].fairness_proof_vec.len();
 
         for (k, refresh_message) in refresh_messages.iter().enumerate() {
+            if refresh_message.new_party && new_parties.contains(&refresh_message.party_index) {
+                continue;
+            }
+
             let fairness_proof_len = refresh_message.fairness_proof_vec.len();
             let points_commited_len = refresh_message.points_committed_vec.len();
             let points_encrypted_len = refresh_message.points_encrypted_vec.len();
@@ -225,31 +234,58 @@ impl<P> RefreshMessage<P> {
             .into_owned();
 
         let new_share_fe: P::Scalar = ECScalar::from(&new_share);
-        let paillier_dk = paillier_key.dk;
+        let paillier_dk = paillier_key.dk.clone();
         let key_linear_x_i = new_share_fe.clone();
-        let key_linear_y = P::generator() * new_share_fe;
-        // let pk_vec = (0..n).iter().map(|i| refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone()).collect();
+        let key_linear_y = P::generator() * new_share_fe.clone();
+        let keys_linear = SharedKeys {
+            x_i: key_linear_x_i,
+            y: key_linear_y,
+        };
+        let mut pk_vec: Vec<_> = (0..n)
+            .map(|i| refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone())
+            .collect();
 
-        // for i in 0..n as usize {
-        //     for j in 1..(t as usize + 1) {
-        //         pk_vec[i] = local_key.pk_vec[i].clone() + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
-        //     }
-        // }
+        for i in 0..n as usize {
+            for j in 1..(t as usize + 1) {
+                pk_vec[i] = pk_vec[i].clone()
+                    + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
+            }
+        }
 
-        // LocalKey {
-        //     paillier_dk: paillier_key.dk,
-        //     pk_vec: vec![],
-        //     keys_linear: SharedKeys {},
-        //     paillier_key_vec: vec![],
-        //     y_sum_s: (),
-        //     h1_h2_n_tilde_vec: vec![],
-        //     vss_scheme: VerifiableSS {},
-        //     i: party_index as u16,
-        //     t: t as u16,
-        //     n: n as u16
-        // };
+        let available_parties: HashMap<usize, EncryptionKey> = refresh_messages
+            .iter()
+            .map(|msg| (msg.party_index, msg.ek.clone()))
+            .collect();
 
-        return Err(FsDkrError::FairnessProof);
+        let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
+            .map(|party| {
+                let ek = available_parties.get(&party);
+
+                match ek {
+                    None => Paillier::keypair().keys().0,
+                    Some(key) => key.clone(),
+                }
+            })
+            .collect();
+
+        // secret share old key
+        let (vss_scheme, _) = VerifiableSS::<P>::share(t, n, &new_share_fe);
+
+        let local_key = LocalKey {
+            paillier_dk,
+            pk_vec,
+            keys_linear,
+            paillier_key_vec,
+            // TODO: not really sure how to handle y_sum_s and h1_h2_n_tilde_vecf
+            y_sum_s: P::generator(),
+            h1_h2_n_tilde_vec: [].to_vec(),
+            vss_scheme,
+            i: party_index as u16,
+            t: t as u16,
+            n: n as u16,
+        };
+
+        Ok(local_key)
     }
 
     fn get_ciphertext_sum<'a>(
@@ -314,7 +350,6 @@ impl<P> RefreshMessage<P> {
         (ciphertext_sum, li_vec)
     }
 
-    // TODO: change Vec<Self> to slice
     pub fn collect(
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<P>,
@@ -331,6 +366,31 @@ impl<P> RefreshMessage<P> {
             local_key.n as usize,
             new_parties,
         )?;
+
+        let mut statement: FairnessStatement<P>;
+        for refresh_message in refresh_messages.iter() {
+            if new_parties.contains(&refresh_message.party_index) {
+                continue;
+            }
+
+            for i in 0..(local_key.n as usize) {
+                if new_parties.contains(&(i + 1)) {
+                    continue;
+                }
+
+                statement = FairnessStatement {
+                    ek: local_key.paillier_key_vec[i].clone(),
+                    c: refresh_message.points_encrypted_vec[i].clone(),
+                    Y: refresh_message.points_committed_vec[i].clone(),
+                };
+                if refresh_message.fairness_proof_vec[i]
+                    .verify(&statement)
+                    .is_err()
+                {
+                    return Err(FsDkrError::FairnessProof);
+                }
+            }
+        }
 
         let old_ek = local_key.paillier_key_vec[(local_key.i - 1) as usize].clone();
         let (cipher_text_sum, li_vec) = RefreshMessage::get_ciphertext_sum(

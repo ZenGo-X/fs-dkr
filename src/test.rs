@@ -84,7 +84,7 @@ mod tests {
     fn simulate_dkr_add() {
         fn simulate_addition(
             keys: &mut Vec<LocalKey>,
-            mut last_round_refresh_messages: Vec<RefreshMessage<GE>>,
+            last_round_refresh_messages: Vec<RefreshMessage<GE>>,
             party_index: usize,
             t: usize,
             n: usize,
@@ -92,9 +92,11 @@ mod tests {
             // TODO: introduce voting for party_index, now we hardcode it.
             let new_parties = [party_index].to_vec();
 
-            // party A generates the key
-            let (new_party_refresh_message, key) =
-                RefreshMessage::distribute_new_party(party_index, t, n);
+            // the new party generates it's broadcast message to start joining the computation
+            let (mut new_party_refresh_message, key) = RefreshMessage::distribute_new_party(t, n);
+
+            // the other parties assigned the new party it's new party_index
+            new_party_refresh_message.party_index = party_index;
 
             let mut broadcast_vec = Vec::new();
             let mut new_dks = Vec::new();
@@ -159,7 +161,7 @@ mod tests {
         )
         .unwrap();
         simulate_dkr(&mut keys);
-        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 4, 5]);
+        let offline_sign = simulate_offline_stage(keys, &[1, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
