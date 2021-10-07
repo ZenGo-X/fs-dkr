@@ -82,15 +82,13 @@ mod tests {
 
     #[test]
     fn simulate_dkr_add() {
-        fn simulate_addition(
+        fn simulate_one_addition(
             keys: &mut Vec<LocalKey>,
-            last_round_refresh_messages: Vec<RefreshMessage<GE>>,
             party_index: usize,
             t: usize,
             n: usize,
         ) -> FsDkrResult<()> {
             // TODO: introduce voting for party_index, now we hardcode it.
-            let new_parties = [party_index].to_vec();
 
             // the new party generates it's broadcast message to start joining the computation
             let (mut new_party_refresh_message, key) = RefreshMessage::distribute_new_party(t, n);
@@ -98,10 +96,11 @@ mod tests {
             // the other parties assigned the new party it's new party_index
             new_party_refresh_message.party_index = party_index;
 
+            let new_parties_refresh_messages = [new_party_refresh_message.clone()].to_vec();
+
             let mut broadcast_vec = Vec::new();
             let mut new_dks = Vec::new();
 
-            // TODO verify new key
             for key in keys.iter_mut() {
                 // add the new ek to each party
                 key.paillier_key_vec[party_index - 1] = new_party_refresh_message.ek.clone();
@@ -111,15 +110,13 @@ mod tests {
             }
 
             // all the other parties will receive it's dummy "refresh message" that signals that a party wants to join.
-            broadcast_vec.push(new_party_refresh_message);
-
             // keys will be updated to refreshed values
             for i in 0..keys.len() as usize {
                 RefreshMessage::collect(
                     &broadcast_vec,
                     &mut keys[i],
                     new_dks[i].clone(),
-                    new_parties.as_slice(),
+                    new_parties_refresh_messages.as_slice(),
                 )
                 .expect("");
             }
@@ -127,20 +124,19 @@ mod tests {
             // if not enough parties trust this new party, the t and n constraints will not be satisfied
             // and the new party will not be able to collect
             let local_key = RefreshMessage::collect_new_party(
-                last_round_refresh_messages.as_slice(),
+                broadcast_vec.as_slice(),
                 key,
                 party_index,
                 t,
                 n,
-                new_parties.as_slice(),
             )?;
-            keys.push(local_key);
 
+            keys.insert(party_index - 1, local_key);
             Ok(())
         }
 
         let t = 2;
-        let n = 7;
+        let n = 6;
 
         let all_keys = simulate_keygen(t, n);
         let mut keys = all_keys[0..5].to_vec();
@@ -148,18 +144,11 @@ mod tests {
         let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
         simulate_signing(offline_sign, b"ZenGo");
 
-        let (last_round_refresh_messages, _) = simulate_dkr(&mut keys);
+        simulate_dkr(&mut keys);
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
 
-        simulate_addition(
-            &mut keys,
-            last_round_refresh_messages,
-            6,
-            t as usize,
-            n as usize,
-        )
-        .unwrap();
+        simulate_one_addition(&mut keys, 6, t as usize, n as usize).unwrap();
         simulate_dkr(&mut keys);
         let offline_sign = simulate_offline_stage(keys, &[1, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");

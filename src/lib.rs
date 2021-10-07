@@ -48,10 +48,20 @@ impl<P> RefreshMessage<P> {
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
         // the new party does not know yet what index will it receive at this point.
+        // We use the 0 index as the "unknown yet" index
         let default_index = 0;
 
         let new_party_key = Keys::create(default_index);
+
+        // generate a dummy refresh message
+        // this can be replaced at some point by a JoinMessage that contains only the key + proof
         let refresh_message = RefreshMessage {
+            // in a join message, we only care about the ek and the correctness proof
+            ek: new_party_key.ek.clone(),
+            dk_correctness_proof: NICorrectKeyProof::proof(&new_party_key.dk, None),
+            new_party: true,
+
+            // these fields need to be filled/generated while refreshing
             party_index: default_index,
             fairness_proof_vec: Vec::new(),
             coefficients_committed_vec: VerifiableSS {
@@ -63,10 +73,7 @@ impl<P> RefreshMessage<P> {
             },
             points_committed_vec: Vec::new(),
             points_encrypted_vec: Vec::new(),
-            dk_correctness_proof: NICorrectKeyProof::proof(&new_party_key.dk, None),
-            ek: new_party_key.ek.clone(),
             remove_party_indices: Vec::new(),
-            new_party: true,
         };
 
         (refresh_message, new_party_key)
@@ -137,12 +144,7 @@ impl<P> RefreshMessage<P> {
         )
     }
 
-    pub fn validate_collect(
-        refresh_messages: &[Self],
-        t: usize,
-        n: usize,
-        new_parties: &[usize],
-    ) -> FsDkrResult<()>
+    pub fn validate_collect(refresh_messages: &[Self], t: usize, n: usize) -> FsDkrResult<()>
     where
         P: ECPoint + Clone + Zeroize + Debug,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
@@ -159,17 +161,9 @@ impl<P> RefreshMessage<P> {
         let reference_len = refresh_messages[0].fairness_proof_vec.len();
 
         for (k, refresh_message) in refresh_messages.iter().enumerate() {
-            if refresh_message.new_party && new_parties.contains(&refresh_message.party_index) {
-                continue;
-            }
-
             let fairness_proof_len = refresh_message.fairness_proof_vec.len();
             let points_commited_len = refresh_message.points_committed_vec.len();
             let points_encrypted_len = refresh_message.points_encrypted_vec.len();
-
-            if new_parties.contains(&refresh_message.party_index) {
-                continue;
-            }
 
             if !(fairness_proof_len == reference_len
                 && points_commited_len == reference_len
@@ -185,9 +179,6 @@ impl<P> RefreshMessage<P> {
         }
 
         for refresh_message in refresh_messages.iter() {
-            if new_parties.contains(&refresh_message.party_index) {
-                continue;
-            }
             for i in 0..n {
                 //TODO: we should handle the case of t<i<n
                 if refresh_message
@@ -209,13 +200,12 @@ impl<P> RefreshMessage<P> {
         party_index: usize,
         t: usize,
         n: usize,
-        new_parties: &[usize],
     ) -> FsDkrResult<LocalKey<P>>
     where
         P: ECPoint + Clone + Zeroize + Debug,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        RefreshMessage::validate_collect(refresh_messages, t, n, new_parties)?;
+        RefreshMessage::validate_collect(refresh_messages, t, n)?;
 
         let parameters = ShamirSecretSharing {
             threshold: t,
@@ -226,7 +216,6 @@ impl<P> RefreshMessage<P> {
             refresh_messages,
             party_index,
             &parameters,
-            new_parties,
             &paillier_key.ek,
         );
         let new_share = Paillier::decrypt(&paillier_key.dk, cipher_text_sum)
@@ -261,6 +250,8 @@ impl<P> RefreshMessage<P> {
             .map(|party| {
                 let ek = available_parties.get(&party);
 
+                // TODO: hacky, here I generate a dummy key if the given index is not in the
+                // computation. This needs a better reasoning
                 match ek {
                     None => Paillier::keypair().keys().0,
                     Some(key) => key.clone(),
@@ -276,7 +267,7 @@ impl<P> RefreshMessage<P> {
             pk_vec,
             keys_linear,
             paillier_key_vec,
-            // TODO: not really sure how to handle y_sum_s and h1_h2_n_tilde_vecf
+            // TODO: not really sure how to handle y_sum_s and h1_h2_n_tilde_vec
             y_sum_s: P::generator(),
             h1_h2_n_tilde_vec: [].to_vec(),
             vss_scheme,
@@ -292,7 +283,6 @@ impl<P> RefreshMessage<P> {
         refresh_messages: &'a [Self],
         party_index: usize,
         parameters: &'a ShamirSecretSharing,
-        new_parties: &[usize],
         ek: &'a EncryptionKey,
     ) -> (RawCiphertext<'a>, Vec<P::Scalar>)
     where
@@ -303,18 +293,7 @@ impl<P> RefreshMessage<P> {
         //decrypt the new share
         // we first homomorphically add all ciphertext encrypted using our encryption key
         let ciphertext_vec: Vec<_> = (0..refresh_messages.len())
-            .filter_map(|k| {
-                if refresh_messages[k].new_party
-                    && new_parties.contains(&refresh_messages[k].party_index)
-                {
-                    None
-                } else {
-                    Some(
-                        refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize]
-                            .clone(),
-                    )
-                }
-            })
+            .map(|k| refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize].clone())
             .collect();
 
         let indices: Vec<_> = (0..(parameters.threshold + 1) as usize)
@@ -354,7 +333,7 @@ impl<P> RefreshMessage<P> {
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<P>,
         new_dk: DecryptionKey,
-        new_parties: &[usize],
+        new_parties: &[Self],
     ) -> FsDkrResult<()>
     where
         P: ECPoint + Clone + Zeroize + Debug,
@@ -364,20 +343,11 @@ impl<P> RefreshMessage<P> {
             refresh_messages,
             local_key.t as usize,
             local_key.n as usize,
-            new_parties,
         )?;
 
         let mut statement: FairnessStatement<P>;
         for refresh_message in refresh_messages.iter() {
-            if new_parties.contains(&refresh_message.party_index) {
-                continue;
-            }
-
             for i in 0..(local_key.n as usize) {
-                if new_parties.contains(&(i + 1)) {
-                    continue;
-                }
-
                 statement = FairnessStatement {
                     ek: local_key.paillier_key_vec[i].clone(),
                     c: refresh_message.points_encrypted_vec[i].clone(),
@@ -387,6 +357,8 @@ impl<P> RefreshMessage<P> {
                     .verify(&statement)
                     .is_err()
                 {
+                    let proof = refresh_message.fairness_proof_vec[i].clone();
+                    proof.verify(&statement).unwrap();
                     return Err(FsDkrError::FairnessProof);
                 }
             }
@@ -397,11 +369,10 @@ impl<P> RefreshMessage<P> {
             refresh_messages,
             local_key.i as usize,
             &local_key.vss_scheme.parameters,
-            new_parties,
             &old_ek,
         );
 
-        for refresh_message in refresh_messages.iter() {
+        for refresh_message in refresh_messages.iter().chain(new_parties.iter()) {
             if refresh_message
                 .dk_correctness_proof
                 .verify(&refresh_message.ek, SALT_STRING)
