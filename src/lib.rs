@@ -49,7 +49,7 @@ impl<P> RefreshMessage<P> {
     {
         // the new party does not know yet what index will it receive at this point.
         // We use the 0 index as the "unknown yet" index
-        let default_index = 6;
+        let default_index = 0;
 
         let new_party_key = Keys::create(default_index);
 
