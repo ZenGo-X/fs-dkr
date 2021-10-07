@@ -149,6 +149,9 @@ mod tests {
         simulate_signing(offline_sign, b"ZenGo");
 
         simulate_one_addition(&mut keys, 6, t as usize, n as usize).unwrap();
+        let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
+        simulate_signing(offline_sign, b"ZenGo");
+
         simulate_dkr(&mut keys);
         let offline_sign = simulate_offline_stage(keys, &[1, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");

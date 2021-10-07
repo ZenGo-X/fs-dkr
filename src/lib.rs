@@ -49,7 +49,7 @@ impl<P> RefreshMessage<P> {
     {
         // the new party does not know yet what index will it receive at this point.
         // We use the 0 index as the "unknown yet" index
-        let default_index = 0;
+        let default_index = 6;
 
         let new_party_key = Keys::create(default_index);
 
@@ -353,14 +353,7 @@ impl<P> RefreshMessage<P> {
                     c: refresh_message.points_encrypted_vec[i].clone(),
                     Y: refresh_message.points_committed_vec[i].clone(),
                 };
-                if refresh_message.fairness_proof_vec[i]
-                    .verify(&statement)
-                    .is_err()
-                {
-                    let proof = refresh_message.fairness_proof_vec[i].clone();
-                    proof.verify(&statement).unwrap();
-                    return Err(FsDkrError::FairnessProof);
-                }
+                refresh_message.fairness_proof_vec[i].verify(&statement)?;
             }
         }
 

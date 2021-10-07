@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+use crate::error::{FsDkrError, FsDkrResult};
 
 use curv::BigInt;
 use paillier::Paillier;
@@ -85,7 +86,7 @@ where
         FairnessProof { e_u, T, z, w }
     }
 
-    pub fn verify(&self, statement: &FairnessStatement<P>) -> Result<(), ()>
+    pub fn verify(&self, statement: &FairnessStatement<P>) -> FsDkrResult<()>
     where
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Zeroize,
@@ -122,7 +123,10 @@ where
 
         match T_add_e_Y == z_G && e_u_add_c_e == enc_z_w {
             true => Ok(()),
-            false => Err(()),
+            false => Err(FsDkrError::FairnessProof {
+                t_add_eq_z_g: T_add_e_Y == z_G,
+                e_u_add_eq_z_w: e_u_add_c_e == enc_z_w,
+            }),
         }
     }
 }
