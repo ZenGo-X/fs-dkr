@@ -244,16 +244,15 @@ impl<P> RefreshMessage<P> {
         let available_parties: HashMap<usize, EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, msg.ek.clone()))
+            .chain(std::iter::once((party_index, paillier_key.ek)))
             .collect();
 
         let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
             .map(|party| {
                 let ek = available_parties.get(&party);
 
-                // TODO: hacky, here I generate a dummy key if the given index is not in the
-                // computation. This needs a better reasoning
                 match ek {
-                    None => Paillier::keypair().keys().0,
+                    None => EncryptionKey{n: BigInt::zero(), nn: BigInt::zero()},
                     Some(key) => key.clone(),
                 }
             })
@@ -373,7 +372,7 @@ impl<P> RefreshMessage<P> {
             {
                 return Err(FsDkrError::PaillierVerificationError {
                     party_index: refresh_message.party_index,
-                });
+                 });
             }
 
             // if the proof checks, we add the new paillier public key to the key
