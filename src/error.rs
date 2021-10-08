@@ -1,3 +1,4 @@
+use crate::add_party::JoinMessage;
 use thiserror::Error;
 
 pub type FsDkrResult<T> = Result<T, FsDkrError>;
@@ -32,6 +33,6 @@ pub enum FsDkrError {
     #[error("Paillier verification proof failed for party {party_index:?}")]
     PaillierVerificationError { party_index: usize },
 
-    #[error("NotImplementedYet")]
-    NotImplementedYet,
+    #[error("The new party described by the JoinMessage {join_message:?} did not receive a valid index.")]
+    NewPartyUnassignedIndexError { join_message: JoinMessage },
 }

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::RefreshMessage;
+    use crate::refresh_message::RefreshMessage;
     use curv::arithmetic::Converter;
     use curv::cryptographic_primitives::hashing::hash_sha256::HSha256;
     use curv::cryptographic_primitives::hashing::traits::Hash;
@@ -17,6 +17,7 @@ mod tests {
         CompletedOfflineStage, OfflineStage, SignManual,
     };
 
+    use crate::add_party::JoinMessage;
     use crate::error::FsDkrResult;
     use paillier::DecryptionKey;
     use round_based::dev::Simulation;
@@ -82,32 +83,41 @@ mod tests {
 
     #[test]
     fn simulate_dkr_add() {
-        fn simulate_one_addition(
+        fn simulate_addition(
             keys: &mut Vec<LocalKey>,
-            party_index: usize,
+            party_indices: &[usize],
             t: usize,
             n: usize,
         ) -> FsDkrResult<()> {
             // TODO: introduce voting for party_index, now we hardcode it.
 
             // the new party generates it's broadcast message to start joining the computation
-            let (mut new_party_refresh_message, key) = RefreshMessage::distribute_new_party(t, n);
+            let mut join_messages: Vec<_> = Vec::new();
 
-            // the other parties assigned the new party it's new party_index
-            new_party_refresh_message.party_index = party_index;
-
-            let new_parties_refresh_messages = [new_party_refresh_message.clone()].to_vec();
-
-            let mut broadcast_vec = Vec::new();
-            let mut new_dks = Vec::new();
-
-            for key in keys.iter_mut() {
-                // add the new ek to each party
-                key.paillier_key_vec[party_index - 1] = new_party_refresh_message.ek.clone();
-                let (refresh_message, new_dk) = RefreshMessage::distribute(key);
-                broadcast_vec.push(refresh_message);
-                new_dks.push(new_dk);
+            for party_index in party_indices.iter() {
+                let (mut new_party_refresh_message, key) = JoinMessage::distribute();
+                new_party_refresh_message.party_index = Some(*party_index);
+                join_messages.push((new_party_refresh_message, key))
             }
+
+            let new_parties_refresh_messages: Vec<JoinMessage> =
+                join_messages.iter().map(|elem| elem.0.clone()).collect();
+
+            let (broadcast_vec, new_dks): (Vec<_>, Vec<_>) = keys
+                .iter_mut()
+                .map(|key| {
+                    let _results: Vec<_> = new_parties_refresh_messages
+                        .iter()
+                        .map(|new_party| {
+                            key.paillier_key_vec[new_party.party_index.unwrap() - 1] =
+                                new_party.ek.clone();
+                            key.h1_h2_n_tilde_vec[new_party.party_index.unwrap() - 1] =
+                                new_party.dlog_statement.clone();
+                        })
+                        .collect();
+                    RefreshMessage::distribute(key)
+                })
+                .unzip();
 
             // all the other parties will receive it's dummy "refresh message" that signals that a party wants to join.
             // keys will be updated to refreshed values
@@ -123,15 +133,14 @@ mod tests {
 
             // if not enough parties trust this new party, the t and n constraints will not be satisfied
             // and the new party will not be able to collect
-            let local_key = RefreshMessage::collect_new_party(
-                broadcast_vec.as_slice(),
-                key,
-                party_index,
-                t,
-                n,
-            )?;
+            for (join_message, dk) in join_messages {
+                let party_index = join_message.party_index.unwrap();
+                let mut local_key =
+                    JoinMessage::collect(broadcast_vec.as_slice(), dk, party_index, t, n)?;
+                local_key.h1_h2_n_tilde_vec = keys[0].h1_h2_n_tilde_vec.clone();
+                keys.insert(party_index - 1, local_key);
+            }
 
-            keys.insert(party_index - 1, local_key);
             Ok(())
         }
 
@@ -148,12 +157,12 @@ mod tests {
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
 
-        simulate_one_addition(&mut keys, 6, t as usize, n as usize).unwrap();
+        simulate_addition(&mut keys, &[6], t as usize, n as usize).unwrap();
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
 
         simulate_dkr(&mut keys);
-        let offline_sign = simulate_offline_stage(keys, &[1, 4, 5]);
+        let offline_sign = simulate_offline_stage(keys, &[1, 4, 6]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
