@@ -135,9 +135,14 @@ mod tests {
             // and the new party will not be able to collect
             for (join_message, dk) in join_messages {
                 let party_index = join_message.party_index.unwrap();
-                let mut local_key =
-                    JoinMessage::collect(broadcast_vec.as_slice(), dk, party_index, t, n)?;
-                local_key.h1_h2_n_tilde_vec = keys[0].h1_h2_n_tilde_vec.clone();
+                let local_key = JoinMessage::collect(
+                    broadcast_vec.as_slice(),
+                    dk,
+                    &join_message,
+                    party_index,
+                    t,
+                    n,
+                )?;
                 keys.insert(party_index - 1, local_key);
             }
 

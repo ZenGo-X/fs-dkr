@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
 use zeroize::Zeroize;
-use zk_paillier::zkproofs::{NICorrectKeyProof, SALT_STRING};
+use zk_paillier::zkproofs::{DLogStatement, NICorrectKeyProof, SALT_STRING};
 
 // Everything here can be broadcasted
 #[derive(Clone, Deserialize, Serialize)]
@@ -28,6 +28,7 @@ pub struct RefreshMessage<P> {
     pub(crate) points_committed_vec: Vec<P>,
     points_encrypted_vec: Vec<BigInt>,
     dk_correctness_proof: NICorrectKeyProof,
+    pub(crate) dlog_statement: DLogStatement,
     pub(crate) ek: EncryptionKey,
     pub(crate) remove_party_indices: Vec<usize>,
 }
@@ -90,6 +91,7 @@ impl<P> RefreshMessage<P> {
                 points_committed_vec,
                 points_encrypted_vec,
                 dk_correctness_proof,
+                dlog_statement: local_key.h1_h2_n_tilde_vec[(local_key.i - 1) as usize].clone(),
                 ek,
                 remove_party_indices: Vec::new(),
             },

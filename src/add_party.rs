@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use zeroize::Zeroize;
-use zk_paillier::zkproofs::{DLogStatement, NICorrectKeyProof};
+use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NICorrectKeyProof};
 
 // Everything here can be broadcasted
 #[derive(Clone, Deserialize, Serialize, Debug)]
@@ -24,26 +24,33 @@ pub struct JoinMessage {
     pub(crate) dk_correctness_proof: NICorrectKeyProof,
     pub(crate) party_index: Option<usize>,
     pub(crate) dlog_statement: DLogStatement,
+    pub(crate) composite_dlog_proof: CompositeDLogProof,
+}
+
+fn generate_dlog_statement() -> (DLogStatement, CompositeDLogProof) {
+    let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
+    let one = BigInt::one();
+    let phi = (&dk_tilde.p - &one) * (&dk_tilde.q - &one);
+    let h1 = BigInt::sample_below(&phi);
+    let s = BigInt::from(2).pow(256_u32);
+    let xhi = BigInt::sample_below(&s);
+    let h1_inv = BigInt::mod_inv(&h1, &ek_tilde.n).unwrap();
+    let h2 = BigInt::mod_pow(&h1_inv, &xhi, &ek_tilde.n);
+
+    let statement = DLogStatement {
+        N: ek_tilde.n,
+        g: h1,
+        ni: h2,
+    };
+
+    let composite_dlog_proof = CompositeDLogProof::prove(&statement, &xhi);
+    (statement, composite_dlog_proof)
 }
 
 impl JoinMessage {
     pub fn distribute() -> (Self, Keys) {
         let new_party_key = Keys::create(0);
-
-        let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
-        let one = BigInt::one();
-        let phi = (&dk_tilde.p - &one) * (&dk_tilde.q - &one);
-        let h1 = BigInt::sample_below(&phi);
-        let s = BigInt::from(2).pow(256 as u32);
-        let xhi = BigInt::sample_below(&s);
-        let h1_inv = BigInt::mod_inv(&h1, &ek_tilde.n).unwrap();
-        let h2 = BigInt::mod_pow(&h1_inv, &xhi, &ek_tilde.n);
-
-        let dlog_statement = DLogStatement {
-            N: ek_tilde.n.clone(),
-            g: h1.clone(),
-            ni: h2.clone(),
-        };
+        let (dlog_statement, composite_dlog_proof) = generate_dlog_statement();
 
         let join_message = JoinMessage {
             // in a join message, we only care about the ek and the correctness proof
@@ -51,6 +58,7 @@ impl JoinMessage {
             dk_correctness_proof: NICorrectKeyProof::proof(&new_party_key.dk, None),
             dlog_statement,
             party_index: None,
+            composite_dlog_proof,
         };
 
         (join_message, new_party_key)
@@ -59,6 +67,7 @@ impl JoinMessage {
     pub fn collect<P>(
         refresh_messages: &[RefreshMessage<P>],
         paillier_key: Keys,
+        join_message: &JoinMessage,
         party_index: usize,
         t: usize,
         n: usize,
@@ -109,6 +118,16 @@ impl JoinMessage {
             .chain(std::iter::once((party_index, paillier_key.ek)))
             .collect();
 
+        // TODO: submit the statement the dlog proof as well!
+        let available_h1_h2_ntilde_vec: HashMap<usize, DLogStatement> = refresh_messages
+            .iter()
+            .map(|msg| (msg.party_index, msg.dlog_statement.clone()))
+            .chain(std::iter::once((
+                party_index,
+                join_message.dlog_statement.clone(),
+            )))
+            .collect();
+
         let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
             .map(|party| {
                 let ek = available_parties.get(&party);
@@ -123,6 +142,17 @@ impl JoinMessage {
             })
             .collect();
 
+        let h1_h2_ntilde_vec: Vec<DLogStatement> = (1..n + 1)
+            .map(|party| {
+                let statement = available_h1_h2_ntilde_vec.get(&party);
+
+                match statement {
+                    None => generate_dlog_statement().0,
+                    Some(dlog_statement) => dlog_statement.clone(),
+                }
+            })
+            .collect();
+
         // secret share old key
         let (vss_scheme, _) = VerifiableSS::<P>::share(t, n, &new_share_fe);
 
@@ -131,9 +161,8 @@ impl JoinMessage {
             pk_vec,
             keys_linear,
             paillier_key_vec,
-            // TODO: not really sure how to handle y_sum_s and h1_h2_n_tilde_vec
             y_sum_s: P::generator(),
-            h1_h2_n_tilde_vec: [].to_vec(),
+            h1_h2_n_tilde_vec: h1_h2_ntilde_vec,
             vss_scheme,
             i: party_index as u16,
             t: t as u16,
