@@ -1,4 +1,4 @@
-use crate::error::FsDkrResult;
+use crate::error::{FsDkrError, FsDkrResult};
 use crate::refresh_message::RefreshMessage;
 use curv::arithmetic::{BasicOps, Modulo, One, Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
@@ -64,11 +64,19 @@ impl JoinMessage {
         (join_message, new_party_key)
     }
 
+    pub fn get_party_index(&self) -> FsDkrResult<usize> {
+        if self.party_index.is_none() {
+            Err(FsDkrError::NewPartyUnassignedIndexError)
+        } else {
+            Ok(self.party_index.unwrap())
+        }
+    }
+
     pub fn collect<P>(
+        &self,
         refresh_messages: &[RefreshMessage<P>],
         paillier_key: Keys,
-        join_message: &JoinMessage,
-        party_index: usize,
+        join_messages: &[&JoinMessage],
         t: usize,
         n: usize,
     ) -> FsDkrResult<LocalKey<P>>
@@ -77,6 +85,11 @@ impl JoinMessage {
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
         RefreshMessage::validate_collect(refresh_messages, t, n)?;
+        let party_index = self.party_index.unwrap();
+
+        for join_message in join_messages.iter() {
+            join_message.get_party_index()?;
+        }
 
         let parameters = ShamirSecretSharing {
             threshold: t,
@@ -112,20 +125,28 @@ impl JoinMessage {
             }
         }
 
-        let available_parties: HashMap<usize, EncryptionKey> = refresh_messages
+        let available_parties: HashMap<usize, &EncryptionKey> = refresh_messages
             .iter()
-            .map(|msg| (msg.party_index, msg.ek.clone()))
-            .chain(std::iter::once((party_index, paillier_key.ek)))
+            .map(|msg| (msg.party_index, &msg.ek))
+            .chain(std::iter::once((party_index, &paillier_key.ek)))
+            .chain(
+                join_messages
+                    .iter()
+                    .map(|join_message| (join_message.party_index.unwrap(), &join_message.ek)),
+            )
             .collect();
 
         // TODO: submit the statement the dlog proof as well!
-        let available_h1_h2_ntilde_vec: HashMap<usize, DLogStatement> = refresh_messages
+        let available_h1_h2_ntilde_vec: HashMap<usize, &DLogStatement> = refresh_messages
             .iter()
-            .map(|msg| (msg.party_index, msg.dlog_statement.clone()))
-            .chain(std::iter::once((
-                party_index,
-                join_message.dlog_statement.clone(),
-            )))
+            .map(|msg| (msg.party_index, &msg.dlog_statement))
+            .chain(std::iter::once((party_index, &self.dlog_statement)))
+            .chain(join_messages.iter().map(|join_message| {
+                (
+                    join_message.party_index.unwrap(),
+                    &join_message.dlog_statement,
+                )
+            }))
             .collect();
 
         let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
@@ -137,7 +158,7 @@ impl JoinMessage {
                         n: BigInt::zero(),
                         nn: BigInt::zero(),
                     },
-                    Some(key) => key.clone(),
+                    Some(key) => (*key).clone(),
                 }
             })
             .collect();
@@ -148,10 +169,16 @@ impl JoinMessage {
 
                 match statement {
                     None => generate_dlog_statement().0,
-                    Some(dlog_statement) => dlog_statement.clone(),
+                    Some(dlog_statement) => (*dlog_statement).clone(),
                 }
             })
             .collect();
+
+        for refresh_message in refresh_messages.iter() {
+            if refresh_message.public_key != refresh_messages[0].public_key {
+                return Err(FsDkrError::BroadcastedPublicKeyError);
+            }
+        }
 
         // secret share old key
         let (vss_scheme, _) = VerifiableSS::<P>::share(t, n, &new_share_fe);
@@ -161,7 +188,7 @@ impl JoinMessage {
             pk_vec,
             keys_linear,
             paillier_key_vec,
-            y_sum_s: P::generator(),
+            y_sum_s: refresh_messages[0].public_key.clone(),
             h1_h2_n_tilde_vec: h1_h2_ntilde_vec,
             vss_scheme,
             i: party_index as u16,

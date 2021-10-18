@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn simulate_dkr_add() {
-        fn simulate_addition(
+        fn simulate_replace(
             keys: &mut Vec<LocalKey>,
             party_indices: &[usize],
             t: usize,
@@ -100,25 +100,23 @@ mod tests {
                 join_messages.push((new_party_refresh_message, key))
             }
 
-            let new_parties_refresh_messages: Vec<JoinMessage> =
-                join_messages.iter().map(|elem| elem.0.clone()).collect();
+            let mut new_parties_refresh_messages: Vec<JoinMessage> = join_messages
+                .iter_mut()
+                .map(|(join_message, _)| join_message.clone())
+                .collect();
 
             let (broadcast_vec, new_dks): (Vec<_>, Vec<_>) = keys
                 .iter_mut()
                 .map(|key| {
-                    let _results: Vec<_> = new_parties_refresh_messages
-                        .iter()
-                        .map(|new_party| {
-                            key.paillier_key_vec[new_party.party_index.unwrap() - 1] =
-                                new_party.ek.clone();
-                            key.h1_h2_n_tilde_vec[new_party.party_index.unwrap() - 1] =
-                                new_party.dlog_statement.clone();
-                        })
-                        .collect();
-                    RefreshMessage::distribute(key)
+                    RefreshMessage::replace(new_parties_refresh_messages.as_mut_slice(), key)
+                        .unwrap()
                 })
                 .unzip();
 
+            let collect_refresh_messages: Vec<&JoinMessage> = join_messages
+                .iter()
+                .map(|(join_message, _)| join_message)
+                .collect();
             // all the other parties will receive it's dummy "refresh message" that signals that a party wants to join.
             // keys will be updated to refreshed values
             for i in 0..keys.len() as usize {
@@ -126,20 +124,19 @@ mod tests {
                     &broadcast_vec,
                     &mut keys[i],
                     new_dks[i].clone(),
-                    new_parties_refresh_messages.as_slice(),
+                    collect_refresh_messages.as_slice(),
                 )
                 .expect("");
             }
 
             // if not enough parties trust this new party, the t and n constraints will not be satisfied
             // and the new party will not be able to collect
-            for (join_message, dk) in join_messages {
+            for (join_message, dk) in join_messages.clone() {
                 let party_index = join_message.party_index.unwrap();
-                let local_key = JoinMessage::collect(
+                let local_key = join_message.collect(
                     broadcast_vec.as_slice(),
                     dk,
-                    &join_message,
-                    party_index,
+                    &collect_refresh_messages.as_slice(),
                     t,
                     n,
                 )?;
@@ -150,24 +147,13 @@ mod tests {
         }
 
         let t = 2;
-        let n = 6;
+        let n = 7;
 
         let all_keys = simulate_keygen(t, n);
         let mut keys = all_keys[0..5].to_vec();
 
-        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
-        simulate_signing(offline_sign, b"ZenGo");
-
-        simulate_dkr(&mut keys);
-        let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
-        simulate_signing(offline_sign, b"ZenGo");
-
-        simulate_addition(&mut keys, &[6], t as usize, n as usize).unwrap();
-        let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
-        simulate_signing(offline_sign, b"ZenGo");
-
-        simulate_dkr(&mut keys);
-        let offline_sign = simulate_offline_stage(keys, &[1, 4, 6]);
+        simulate_replace(&mut keys, &[2, 7], t as usize, n as usize).unwrap();
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 

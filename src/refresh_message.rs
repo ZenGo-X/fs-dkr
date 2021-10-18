@@ -31,6 +31,7 @@ pub struct RefreshMessage<P> {
     pub(crate) dlog_statement: DLogStatement,
     pub(crate) ek: EncryptionKey,
     pub(crate) remove_party_indices: Vec<usize>,
+    pub(crate) public_key: P,
 }
 
 impl<P> RefreshMessage<P> {
@@ -94,6 +95,7 @@ impl<P> RefreshMessage<P> {
                 dlog_statement: local_key.h1_h2_n_tilde_vec[(local_key.i - 1) as usize].clone(),
                 ek,
                 remove_party_indices: Vec::new(),
+                public_key: local_key.y_sum_s.clone(),
             },
             dk,
         )
@@ -199,11 +201,29 @@ impl<P> RefreshMessage<P> {
         (ciphertext_sum, li_vec)
     }
 
+    pub fn replace(
+        new_parties: &mut [JoinMessage],
+        key: &mut LocalKey<P>,
+    ) -> FsDkrResult<(Self, DecryptionKey)>
+    where
+        P: ECPoint + Clone + Zeroize + Debug,
+        P::Scalar: PartialEq + Clone + Debug + Zeroize,
+    {
+        for join_message in new_parties.iter_mut() {
+            let party_index = join_message.get_party_index()?;
+            join_message.party_index = Some(party_index);
+            key.paillier_key_vec[party_index - 1] = join_message.ek.clone();
+            key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement.clone();
+        }
+
+        Ok(RefreshMessage::distribute(key))
+    }
+
     pub fn collect(
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<P>,
         new_dk: DecryptionKey,
-        join_messages: &[JoinMessage],
+        join_messages: &[&JoinMessage],
     ) -> FsDkrResult<()>
     where
         P: ECPoint + Clone + Zeroize + Debug,
@@ -251,14 +271,8 @@ impl<P> RefreshMessage<P> {
                 refresh_message.ek.clone();
         }
 
-        for join_message in join_messages.iter() {
-            if join_message.party_index.is_none() {
-                return Err(FsDkrError::NewPartyUnassignedIndexError {
-                    join_message: join_message.clone(),
-                });
-            }
-
-            let party_index = join_message.party_index.unwrap();
+        for join_message in join_messages {
+            let party_index = join_message.get_party_index()?;
 
             if join_message
                 .dk_correctness_proof
@@ -266,6 +280,14 @@ impl<P> RefreshMessage<P> {
                 .is_err()
             {
                 return Err(FsDkrError::PaillierVerificationError { party_index });
+            }
+
+            if join_message
+                .composite_dlog_proof
+                .verify(&join_message.dlog_statement)
+                .is_err()
+            {
+                return Err(FsDkrError::DLogProofValidation { party_index });
             }
 
             // if the proof checks, we add the new paillier public key to the key
