@@ -82,15 +82,13 @@ mod tests {
     }
 
     #[test]
-    fn simulate_dkr_add() {
+    fn test_add_party() {
         fn simulate_replace(
             keys: &mut Vec<LocalKey>,
             party_indices: &[usize],
             t: usize,
             n: usize,
         ) -> FsDkrResult<()> {
-            // TODO: introduce voting for party_index, now we hardcode it.
-
             // the new party generates it's broadcast message to start joining the computation
             let mut join_messages: Vec<_> = Vec::new();
 
@@ -113,10 +111,6 @@ mod tests {
                 })
                 .unzip();
 
-            let collect_refresh_messages: Vec<&JoinMessage> = join_messages
-                .iter()
-                .map(|(join_message, _)| join_message)
-                .collect();
             // all the other parties will receive it's dummy "refresh message" that signals that a party wants to join.
             // keys will be updated to refreshed values
             for i in 0..keys.len() as usize {
@@ -124,7 +118,7 @@ mod tests {
                     &broadcast_vec,
                     &mut keys[i],
                     new_dks[i].clone(),
-                    collect_refresh_messages.as_slice(),
+                    new_parties_refresh_messages.as_slice(),
                 )
                 .expect("");
             }
@@ -136,7 +130,7 @@ mod tests {
                 let local_key = join_message.collect(
                     broadcast_vec.as_slice(),
                     dk,
-                    &collect_refresh_messages.as_slice(),
+                    new_parties_refresh_messages.as_slice(),
                     t,
                     n,
                 )?;
@@ -153,7 +147,7 @@ mod tests {
         let mut keys = all_keys[0..5].to_vec();
 
         simulate_replace(&mut keys, &[2, 7], t as usize, n as usize).unwrap();
-        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 7]);
+        let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 

@@ -211,9 +211,8 @@ impl<P> RefreshMessage<P> {
     {
         for join_message in new_parties.iter_mut() {
             let party_index = join_message.get_party_index()?;
-            join_message.party_index = Some(party_index);
             key.paillier_key_vec[party_index - 1] = join_message.ek.clone();
-            key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement.clone();
+            key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement_base_h1.clone();
         }
 
         Ok(RefreshMessage::distribute(key))
@@ -223,7 +222,7 @@ impl<P> RefreshMessage<P> {
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<P>,
         new_dk: DecryptionKey,
-        join_messages: &[&JoinMessage],
+        join_messages: &[JoinMessage],
     ) -> FsDkrResult<()>
     where
         P: ECPoint + Clone + Zeroize + Debug,
@@ -283,9 +282,13 @@ impl<P> RefreshMessage<P> {
             }
 
             if join_message
-                .composite_dlog_proof
-                .verify(&join_message.dlog_statement)
+                .composite_dlog_proof_base_h1
+                .verify(&join_message.dlog_statement_base_h1)
                 .is_err()
+                || join_message
+                    .composite_dlog_proof_base_h2
+                    .verify(&join_message.dlog_statement_base_h2)
+                    .is_err()
             {
                 return Err(FsDkrError::DLogProofValidation { party_index });
             }

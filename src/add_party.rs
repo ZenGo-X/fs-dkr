@@ -6,7 +6,7 @@ use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
 };
 use curv::elliptic::curves::traits::{ECPoint, ECScalar};
 use curv::BigInt;
-use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2018::party_i::Keys;
+use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Keys;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SharedKeys;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
 pub use paillier::DecryptionKey;
@@ -23,60 +23,95 @@ pub struct JoinMessage {
     pub(crate) ek: EncryptionKey,
     pub(crate) dk_correctness_proof: NICorrectKeyProof,
     pub(crate) party_index: Option<usize>,
-    pub(crate) dlog_statement: DLogStatement,
-    pub(crate) composite_dlog_proof: CompositeDLogProof,
+    pub(crate) dlog_statement_base_h1: DLogStatement,
+    pub(crate) dlog_statement_base_h2: DLogStatement,
+    pub(crate) composite_dlog_proof_base_h1: CompositeDLogProof,
+    pub(crate) composite_dlog_proof_base_h2: CompositeDLogProof,
 }
 
-fn generate_dlog_statement() -> (DLogStatement, CompositeDLogProof) {
+fn generate_h1_h2_n_tilde() -> (BigInt, BigInt, BigInt, BigInt, BigInt) {
     let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
     let one = BigInt::one();
     let phi = (&dk_tilde.p - &one) * (&dk_tilde.q - &one);
-    let h1 = BigInt::sample_below(&phi);
-    let s = BigInt::from(2).pow(256_u32);
-    let xhi = BigInt::sample_below(&s);
-    let h1_inv = BigInt::mod_inv(&h1, &ek_tilde.n).unwrap();
-    let h2 = BigInt::mod_pow(&h1_inv, &xhi, &ek_tilde.n);
+    let h1 = BigInt::sample_below(&ek_tilde.n);
+    let (mut xhi, mut xhi_inv) = loop {
+        let xhi_ = BigInt::sample_below(&phi);
+        match BigInt::mod_inv(&xhi_, &phi) {
+            Some(inv) => break (xhi_, inv),
+            None => continue,
+        }
+    };
+    let h2 = BigInt::mod_pow(&h1, &xhi, &ek_tilde.n);
+    xhi = BigInt::sub(&phi, &xhi);
+    xhi_inv = BigInt::sub(&phi, &xhi_inv);
+    (ek_tilde.n, h1, h2, xhi, xhi_inv)
+}
 
-    let statement = DLogStatement {
-        N: ek_tilde.n,
-        g: h1,
-        ni: h2,
+fn generate_dlog_statement_proofs() -> (
+    DLogStatement,
+    DLogStatement,
+    CompositeDLogProof,
+    CompositeDLogProof,
+) {
+    let (n_tilde, h1, h2, xhi, xhi_inv) = generate_h1_h2_n_tilde();
+
+    let dlog_statement_base_h1 = DLogStatement {
+        N: n_tilde.clone(),
+        g: h1.clone(),
+        ni: h2.clone(),
     };
 
-    let composite_dlog_proof = CompositeDLogProof::prove(&statement, &xhi);
-    (statement, composite_dlog_proof)
+    let dlog_statement_base_h2 = DLogStatement {
+        N: n_tilde,
+        g: h2,
+        ni: h1,
+    };
+
+    let composite_dlog_proof_base_h1 = CompositeDLogProof::prove(&dlog_statement_base_h1, &xhi);
+    let composite_dlog_proof_base_h2 = CompositeDLogProof::prove(&dlog_statement_base_h2, &xhi_inv);
+
+    (
+        dlog_statement_base_h1,
+        dlog_statement_base_h2,
+        composite_dlog_proof_base_h1,
+        composite_dlog_proof_base_h2,
+    )
 }
 
 impl JoinMessage {
     pub fn distribute() -> (Self, Keys) {
-        let new_party_key = Keys::create(0);
-        let (dlog_statement, composite_dlog_proof) = generate_dlog_statement();
+        let pailier_key_pair = Keys::create(0);
+        let (
+            dlog_statement_base_h1,
+            dlog_statement_base_h2,
+            composite_dlog_proof_base_h1,
+            composite_dlog_proof_base_h2,
+        ) = generate_dlog_statement_proofs();
 
         let join_message = JoinMessage {
             // in a join message, we only care about the ek and the correctness proof
-            ek: new_party_key.ek.clone(),
-            dk_correctness_proof: NICorrectKeyProof::proof(&new_party_key.dk, None),
-            dlog_statement,
+            ek: pailier_key_pair.ek.clone(),
+            dk_correctness_proof: NICorrectKeyProof::proof(&pailier_key_pair.dk, None),
+            dlog_statement_base_h1,
+            dlog_statement_base_h2,
+            composite_dlog_proof_base_h1,
+            composite_dlog_proof_base_h2,
             party_index: None,
-            composite_dlog_proof,
         };
 
-        (join_message, new_party_key)
+        (join_message, pailier_key_pair)
     }
 
     pub fn get_party_index(&self) -> FsDkrResult<usize> {
-        if self.party_index.is_none() {
-            Err(FsDkrError::NewPartyUnassignedIndexError)
-        } else {
-            Ok(self.party_index.unwrap())
-        }
+        self.party_index
+            .ok_or(FsDkrError::NewPartyUnassignedIndexError)
     }
 
     pub fn collect<P>(
         &self,
         refresh_messages: &[RefreshMessage<P>],
         paillier_key: Keys,
-        join_messages: &[&JoinMessage],
+        join_messages: &[JoinMessage],
         t: usize,
         n: usize,
     ) -> FsDkrResult<LocalKey<P>>
@@ -140,11 +175,11 @@ impl JoinMessage {
         let available_h1_h2_ntilde_vec: HashMap<usize, &DLogStatement> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.dlog_statement))
-            .chain(std::iter::once((party_index, &self.dlog_statement)))
+            .chain(std::iter::once((party_index, &self.dlog_statement_base_h1)))
             .chain(join_messages.iter().map(|join_message| {
                 (
                     join_message.party_index.unwrap(),
-                    &join_message.dlog_statement,
+                    &join_message.dlog_statement_base_h1,
                 )
             }))
             .collect();
@@ -168,7 +203,7 @@ impl JoinMessage {
                 let statement = available_h1_h2_ntilde_vec.get(&party);
 
                 match statement {
-                    None => generate_dlog_statement().0,
+                    None => generate_dlog_statement_proofs().0,
                     Some(dlog_statement) => (*dlog_statement).clone(),
                 }
             })
