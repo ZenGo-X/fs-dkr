@@ -10,6 +10,7 @@ mod tests {
     use curv::elliptic::curves::secp256_k1::GE;
     use curv::BigInt;
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::verify;
+    use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Keys;
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::{
         Keygen, LocalKey,
     };
@@ -89,51 +90,60 @@ mod tests {
             t: usize,
             n: usize,
         ) -> FsDkrResult<()> {
-            // the new party generates it's broadcast message to start joining the computation
-            let mut join_messages: Vec<_> = Vec::new();
-
-            for party_index in party_indices.iter() {
-                let (mut new_party_refresh_message, key) = JoinMessage::distribute();
-                new_party_refresh_message.party_index = Some(*party_index);
-                join_messages.push((new_party_refresh_message, key))
+            fn generate_join_messages_and_keys(
+                number_of_new_parties: usize,
+            ) -> (Vec<JoinMessage>, Vec<Keys>) {
+                // the new party generates it's join message to start joining the computation
+                (0..number_of_new_parties)
+                    .map(|_| JoinMessage::distribute())
+                    .unzip()
             }
 
-            let mut new_parties_refresh_messages: Vec<JoinMessage> = join_messages
-                .iter_mut()
-                .map(|(join_message, _)| join_message.clone())
-                .collect();
+            fn generate_refresh_parties_replace(
+                keys: &mut [LocalKey],
+                join_messages: &[JoinMessage],
+            ) -> (Vec<RefreshMessage<GE>>, Vec<DecryptionKey>) {
+                keys.iter_mut()
+                    .map(|key| RefreshMessage::replace(join_messages, key).unwrap())
+                    .unzip()
+            }
 
-            let (broadcast_vec, new_dks): (Vec<_>, Vec<_>) = keys
-                .iter_mut()
-                .map(|key| {
-                    RefreshMessage::replace(new_parties_refresh_messages.as_mut_slice(), key)
-                        .unwrap()
-                })
-                .unzip();
+            // each party that wants to join generates a join message and a pair of pailier keys.
+            let (mut join_messages, new_keys) =
+                generate_join_messages_and_keys(party_indices.len());
 
-            // all the other parties will receive it's dummy "refresh message" that signals that a party wants to join.
-            // keys will be updated to refreshed values
+            // each new party has to be informed through offchannel communication what party index
+            // it has been assigned (the information is public).
+            for (join_message, party_index) in join_messages.iter_mut().zip(party_indices) {
+                join_message.party_index = Some(*party_index);
+            }
+
+            // each existing party has to generate it's refresh message aware of the new parties
+            let (refresh_messages, dk_keys) =
+                generate_refresh_parties_replace(keys, join_messages.as_slice());
+
+            // all existing parties rotate aware of the join_messages
             for i in 0..keys.len() as usize {
                 RefreshMessage::collect(
-                    &broadcast_vec,
+                    refresh_messages.as_slice(),
                     &mut keys[i],
-                    new_dks[i].clone(),
-                    new_parties_refresh_messages.as_slice(),
+                    dk_keys[i].clone(),
+                    join_messages.as_slice(),
                 )
                 .expect("");
             }
 
-            // if not enough parties trust this new party, the t and n constraints will not be satisfied
-            // and the new party will not be able to collect
-            for (join_message, dk) in join_messages.clone() {
+            // all new parties generate a local key
+            for (join_message, dk) in join_messages.iter().zip(new_keys) {
                 let party_index = join_message.party_index.unwrap();
                 let local_key = join_message.collect(
-                    broadcast_vec.as_slice(),
+                    refresh_messages.as_slice(),
                     dk,
-                    new_parties_refresh_messages.as_slice(),
+                    join_messages.as_slice(),
                     t,
                     n,
                 )?;
+
                 keys.insert(party_index - 1, local_key);
             }
 

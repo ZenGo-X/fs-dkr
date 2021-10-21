@@ -202,14 +202,14 @@ impl<P> RefreshMessage<P> {
     }
 
     pub fn replace(
-        new_parties: &mut [JoinMessage],
+        new_parties: &[JoinMessage],
         key: &mut LocalKey<P>,
     ) -> FsDkrResult<(Self, DecryptionKey)>
     where
         P: ECPoint + Clone + Zeroize + Debug,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
-        for join_message in new_parties.iter_mut() {
+        for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
             key.paillier_key_vec[party_index - 1] = join_message.ek.clone();
             key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement_base_h1.clone();
