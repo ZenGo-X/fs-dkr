@@ -13,7 +13,7 @@ use curv::elliptic::curves::traits::*;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
-/// non interactive proof of fairness, taken from [https://hal.inria.fr/inria-00565274/document]
+/// non interactive proof of fairness, taken from <https://hal.inria.fr/inria-00565274/document>
 
 /// Witness: x
 ///

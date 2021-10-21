@@ -1,4 +1,4 @@
-use crate::add_party::JoinMessage;
+use crate::add_party_message::JoinMessage;
 use crate::error::{FsDkrError, FsDkrResult};
 use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
 use curv::arithmetic::{Samplable, Zero};

@@ -18,7 +18,7 @@ mod tests {
         CompletedOfflineStage, OfflineStage, SignManual,
     };
 
-    use crate::add_party::JoinMessage;
+    use crate::add_party_message::JoinMessage;
     use crate::error::FsDkrResult;
     use paillier::DecryptionKey;
     use round_based::dev::Simulation;
