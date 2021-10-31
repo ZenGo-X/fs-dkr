@@ -15,11 +15,11 @@ pub enum FsDkrError {
     #[error("Shares did not pass verification.")]
     PublicShareValidationError,
 
-    #[error("SizeMismatch error for the refresh message {refresh_message_index:?} - Fairness proof length: {fairness_proof_len:?}, Points Commited Length: {points_commited_len:?}, Points Encrypted Length: {points_encrypted_len:?}")]
+    #[error("SizeMismatch error for the refresh message {refresh_message_index:?} - Fairness proof length: {fairness_proof_len:?}, Points Committed Length: {points_committed_len:?}, Points Encrypted Length: {points_encrypted_len:?}")]
     SizeMismatchError {
         refresh_message_index: usize,
         fairness_proof_len: usize,
-        points_commited_len: usize,
+        points_committed_len: usize,
         points_encrypted_len: usize,
     },
 
