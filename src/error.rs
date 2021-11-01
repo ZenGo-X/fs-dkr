@@ -23,12 +23,21 @@ pub enum FsDkrError {
         points_encrypted_len: usize,
     },
 
-    #[error("Fairness proof verification failed.")]
-    FairnessProof,
+    #[error("Fairness proof verification failed, results - T_add_e_Y == z_G: {t_add_eq_z_g:?} - e_u_add_c_e == enc_z_w: {e_u_add_eq_z_w:?}")]
+    FairnessProof {
+        t_add_eq_z_g: bool,
+        e_u_add_eq_z_w: bool,
+    },
 
     #[error("Paillier verification proof failed for party {party_index:?}")]
     PaillierVerificationError { party_index: usize },
 
-    #[error("NotImplementedYet")]
-    NotImplementedYet,
+    #[error("A new party did not receive a valid index.")]
+    NewPartyUnassignedIndexError,
+
+    #[error("The broadcasted public key is not the same from everyone, aborting")]
+    BroadcastedPublicKeyError,
+
+    #[error("DLog proof failed for party {party_index:?}")]
+    DLogProofValidation { party_index: usize },
 }
