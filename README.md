@@ -15,7 +15,7 @@ Rushing adversary is a common assumption in Multiparty Computation (MPC). In FS-
 in this write-up we show how by adjusting FS-DKG to key rotation for threshold ecdsa the above shortcomings are avoided.
 
 ## Our Model
-We use standard proactive security assumptions. The protocol will be run by $n$ parties. We assume honest majority, that is, number of corruptions is $t<n/2$. The adversary is malicious, and rushing. 
+We use standard proactive security assumptions. The protocol will be run by $n$ parties. We assume honest majority, that is, number of corruptions is $t<=n/2$. The adversary is malicious, and rushing.
 For communication, the parties have access to a broadcast channel (can be implemented via a bulletin board).
 For threshold ECDSA, we focus on [GG20](https://eprint.iacr.org/2020/540.pdf) protocol, currently considered state of the art and most widely deployed threshold ecdsa scheme (e.g. [multi-party-ecdsa](https://github.com/ZenGo-X/multi-party-ecdsa), [tss-lib](https://github.com/binance-chain/tss-lib)). 
 
