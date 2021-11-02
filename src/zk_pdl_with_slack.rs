@@ -197,7 +197,8 @@ mod test {
     #[test]
     fn test_zk_pdl_with_slack() {
         //  N_tilde, h1, h2 generation
-        let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
+        let (ek_tilde, dk_tilde) =
+            Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         // note: safe primes should be used:
         // let (ek_tilde, dk_tilde) = Paillier::keypair_safe_primes().keys();
         let one = BigInt::one();
@@ -216,7 +217,7 @@ mod test {
         let composite_dlog_proof = CompositeDLogProof::prove(&statement, &xhi);
 
         // generate the scalar secret and Paillier encrypt it
-        let (ek, _dk) = Paillier::keypair().keys();
+        let (ek, _dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         // note: safe primes should be used here as well:
         // let (ek_tilde, dk_tilde) = Paillier::keypair_safe_primes().keys();
         let randomness = Randomness::sample(&ek);
@@ -257,7 +258,8 @@ mod test {
     #[should_panic]
     fn test_zk_pdl_with_slack_soundness() {
         //  N_tilde, h1, h2 generation
-        let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
+        let (ek_tilde, dk_tilde) =
+            Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         // note: safe primes should be used:
         // let (ek_tilde, dk_tilde) = Paillier::keypair_safe_primes().keys();
         let one = BigInt::one();
@@ -276,7 +278,7 @@ mod test {
         let composite_dlog_proof = CompositeDLogProof::prove(&statement, &xhi);
 
         // generate the scalar secret and Paillier encrypt it
-        let (ek, _dk) = Paillier::keypair().keys();
+        let (ek, _dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         // note: safe primes should be used here as well:
         // let (ek_tilde, dk_tilde) = Paillier::keypair_safe_primes().keys();
         let randomness = Randomness::sample(&ek);

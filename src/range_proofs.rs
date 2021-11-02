@@ -611,7 +611,8 @@ pub(crate) mod tests {
     use paillier::{Add, DecryptionKey, Mul, Paillier, RawCiphertext, RawPlaintext};
 
     pub(crate) fn generate_init() -> (DLogStatement, EncryptionKey, DecryptionKey) {
-        let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
+        let (ek_tilde, dk_tilde) =
+            Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         let one = BigInt::one();
         let phi = (&dk_tilde.p - &one) * (&dk_tilde.q - &one);
         let h1 = BigInt::sample_below(&ek_tilde.n);
@@ -624,7 +625,7 @@ pub(crate) mod tests {
         };
         let h2 = BigInt::mod_pow(&h1, &xhi, &ek_tilde.n);
 
-        let (ek, dk) = Paillier::keypair().keys();
+        let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         let dlog_statement = DLogStatement {
             g: h1,
             ni: h2,

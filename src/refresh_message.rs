@@ -1,7 +1,8 @@
 use crate::add_party_message::JoinMessage;
 use crate::error::{FsDkrError, FsDkrResult};
+use crate::range_proofs::AliceProof;
 use crate::zk_pdl_with_slack::{PDLwSlackProof, PDLwSlackStatement, PDLwSlackWitness};
-use curv::arithmetic::{Samplable, Zero};
+use curv::arithmetic::{BitManipulation, Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
@@ -24,6 +25,7 @@ use zk_paillier::zkproofs::{DLogStatement, NICorrectKeyProof, SALT_STRING};
 pub struct RefreshMessage<P> {
     pub(crate) party_index: usize,
     pdl_proof_vec: Vec<PDLwSlackProof<P>>,
+    range_proofs: Vec<AliceProof<P>>,
     coefficients_committed_vec: VerifiableSS<P>,
     pub(crate) points_committed_vec: Vec<P>,
     points_encrypted_vec: Vec<BigInt>,
@@ -85,13 +87,26 @@ impl<P> RefreshMessage<P> {
             })
             .collect();
 
-        let (ek, dk) = Paillier::keypair().keys();
+        let range_proofs = (0..secret_shares.len())
+            .map(|i| {
+                AliceProof::generate(
+                    &secret_shares[i].to_big_int(),
+                    &points_encrypted_vec[i],
+                    &local_key.paillier_key_vec[i],
+                    &local_key.h1_h2_n_tilde_vec[i],
+                    &randomness_vec[i],
+                )
+            })
+            .collect();
+
+        let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         let dk_correctness_proof = NICorrectKeyProof::proof(&dk, None);
 
         (
             RefreshMessage {
                 party_index: local_key.i as usize,
                 pdl_proof_vec,
+                range_proofs,
                 coefficients_committed_vec: vss_scheme,
                 points_committed_vec,
                 points_encrypted_vec,
@@ -250,6 +265,13 @@ impl<P> RefreshMessage<P> {
                     N_tilde: local_key.h1_h2_n_tilde_vec[i].N.clone(),
                 };
                 refresh_message.pdl_proof_vec[i].verify(&statement)?;
+                if !refresh_message.range_proofs[i].verify(
+                    &statement.ciphertext,
+                    &statement.ek,
+                    &local_key.h1_h2_n_tilde_vec[i],
+                ) {
+                    return Err(FsDkrError::RangeProof { party_index: i });
+                }
             }
         }
 
@@ -269,6 +291,13 @@ impl<P> RefreshMessage<P> {
             {
                 return Err(FsDkrError::PaillierVerificationError {
                     party_index: refresh_message.party_index,
+                });
+            }
+            let n_length = refresh_message.ek.n.bit_length();
+            if n_length > crate::PAILLIER_KEY_SIZE || n_length < crate::PAILLIER_KEY_SIZE - 1 {
+                return Err(FsDkrError::MouliTooSmall {
+                    party_index: refresh_message.party_index,
+                    moduli_size: n_length,
                 });
             }
 
@@ -298,6 +327,14 @@ impl<P> RefreshMessage<P> {
                     .is_err()
             {
                 return Err(FsDkrError::DLogProofValidation { party_index });
+            }
+
+            let n_length = join_message.ek.n.bit_length();
+            if n_length > crate::PAILLIER_KEY_SIZE || n_length < crate::PAILLIER_KEY_SIZE - 1 {
+                return Err(FsDkrError::MouliTooSmall {
+                    party_index: join_message.get_party_index()?,
+                    moduli_size: n_length,
+                });
             }
 
             // if the proof checks, we add the new paillier public key to the key

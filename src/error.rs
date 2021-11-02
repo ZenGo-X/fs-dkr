@@ -30,6 +30,15 @@ pub enum FsDkrError {
         is_u3_eq: bool,
     },
 
+    #[error("Range Proof failed for party: {party_index:?}")]
+    RangeProof { party_index: usize },
+
+    #[error("The Paillier moduli size of party: {party_index:?} is {moduli_size:?} bits, when it should be 2047-2048 bits")]
+    MouliTooSmall {
+        party_index: usize,
+        moduli_size: usize,
+    },
+
     #[error("Paillier verification proof failed for party {party_index:?}")]
     PaillierVerificationError { party_index: usize },
 

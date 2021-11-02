@@ -44,7 +44,7 @@ pub struct JoinMessage {
 /// environment variables for each party that they agree on. In this case, each new party generates
 /// it's own DlogStatements and submits it's proofs
 fn generate_h1_h2_n_tilde() -> (BigInt, BigInt, BigInt, BigInt, BigInt) {
-    let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
+    let (ek_tilde, dk_tilde) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
     let one = BigInt::one();
     let phi = (&dk_tilde.p - &one) * (&dk_tilde.q - &one);
     let h1 = BigInt::sample_below(&ek_tilde.n);
