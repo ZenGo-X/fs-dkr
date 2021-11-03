@@ -1,7 +1,8 @@
 use crate::add_party_message::JoinMessage;
 use crate::error::{FsDkrError, FsDkrResult};
-use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
-use curv::arithmetic::{Samplable, Zero};
+use crate::range_proofs::AliceProof;
+use crate::zk_pdl_with_slack::{PDLwSlackProof, PDLwSlackStatement, PDLwSlackWitness};
+use curv::arithmetic::{BitManipulation, Samplable, Zero};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
@@ -23,7 +24,8 @@ use zk_paillier::zkproofs::{DLogStatement, NICorrectKeyProof, SALT_STRING};
 #[derive(Clone, Deserialize, Serialize)]
 pub struct RefreshMessage<P> {
     pub(crate) party_index: usize,
-    fairness_proof_vec: Vec<FairnessProof<P>>,
+    pdl_proof_vec: Vec<PDLwSlackProof<P>>,
+    range_proofs: Vec<AliceProof<P>>,
     coefficients_committed_vec: VerifiableSS<P>,
     pub(crate) points_committed_vec: Vec<P>,
     points_encrypted_vec: Vec<BigInt>,
@@ -65,29 +67,46 @@ impl<P> RefreshMessage<P> {
             })
             .unzip();
 
-        // generate proof of fairness for each {point_committed, point_encrypted} pair
-        let fairness_proof_vec: Vec<_> = (0..secret_shares.len())
+        // generate PDL proofs for each {point_committed, point_encrypted} pair
+        let pdl_proof_vec: Vec<_> = (0..secret_shares.len())
             .map(|i| {
-                let witness = FairnessWitness {
+                let witness = PDLwSlackWitness {
                     x: secret_shares[i].clone(),
                     r: randomness_vec[i].clone(),
                 };
-                let statement = FairnessStatement {
+                let statement = PDLwSlackStatement {
+                    ciphertext: points_encrypted_vec[i].clone(),
                     ek: local_key.paillier_key_vec[i].clone(),
-                    c: points_encrypted_vec[i].clone(),
-                    Y: points_committed_vec[i].clone(),
+                    Q: points_committed_vec[i].clone(),
+                    G: P::generator(),
+                    h1: local_key.h1_h2_n_tilde_vec[i].g.clone(),
+                    h2: local_key.h1_h2_n_tilde_vec[i].ni.clone(),
+                    N_tilde: local_key.h1_h2_n_tilde_vec[i].N.clone(),
                 };
-                FairnessProof::prove(&witness, &statement)
+                PDLwSlackProof::prove(&witness, &statement)
             })
             .collect();
 
-        let (ek, dk) = Paillier::keypair().keys();
+        let range_proofs = (0..secret_shares.len())
+            .map(|i| {
+                AliceProof::generate(
+                    &secret_shares[i].to_big_int(),
+                    &points_encrypted_vec[i],
+                    &local_key.paillier_key_vec[i],
+                    &local_key.h1_h2_n_tilde_vec[i],
+                    &randomness_vec[i],
+                )
+            })
+            .collect();
+
+        let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
         let dk_correctness_proof = NICorrectKeyProof::proof(&dk, None);
 
         (
             RefreshMessage {
                 party_index: local_key.i as usize,
-                fairness_proof_vec,
+                pdl_proof_vec,
+                range_proofs,
                 coefficients_committed_vec: vss_scheme,
                 points_committed_vec,
                 points_encrypted_vec,
@@ -115,20 +134,20 @@ impl<P> RefreshMessage<P> {
         }
 
         // check all vectors are of same length
-        let reference_len = refresh_messages[0].fairness_proof_vec.len();
+        let reference_len = refresh_messages[0].pdl_proof_vec.len();
 
         for (k, refresh_message) in refresh_messages.iter().enumerate() {
-            let fairness_proof_len = refresh_message.fairness_proof_vec.len();
+            let pdl_proof_len = refresh_message.pdl_proof_vec.len();
             let points_commited_len = refresh_message.points_committed_vec.len();
             let points_encrypted_len = refresh_message.points_encrypted_vec.len();
 
-            if !(fairness_proof_len == reference_len
+            if !(pdl_proof_len == reference_len
                 && points_commited_len == reference_len
                 && points_encrypted_len == reference_len)
             {
                 return Err(FsDkrError::SizeMismatchError {
                     refresh_message_index: k,
-                    fairness_proof_len,
+                    pdl_proof_len,
                     points_commited_len,
                     points_encrypted_len,
                 });
@@ -234,15 +253,25 @@ impl<P> RefreshMessage<P> {
             local_key.n as usize,
         )?;
 
-        let mut statement: FairnessStatement<P>;
         for refresh_message in refresh_messages.iter() {
             for i in 0..(local_key.n as usize) {
-                statement = FairnessStatement {
+                let statement = PDLwSlackStatement {
+                    ciphertext: refresh_message.points_encrypted_vec[i].clone(),
                     ek: local_key.paillier_key_vec[i].clone(),
-                    c: refresh_message.points_encrypted_vec[i].clone(),
-                    Y: refresh_message.points_committed_vec[i].clone(),
+                    Q: refresh_message.points_committed_vec[i].clone(),
+                    G: P::generator(),
+                    h1: local_key.h1_h2_n_tilde_vec[i].g.clone(),
+                    h2: local_key.h1_h2_n_tilde_vec[i].ni.clone(),
+                    N_tilde: local_key.h1_h2_n_tilde_vec[i].N.clone(),
                 };
-                refresh_message.fairness_proof_vec[i].verify(&statement)?;
+                refresh_message.pdl_proof_vec[i].verify(&statement)?;
+                if !refresh_message.range_proofs[i].verify(
+                    &statement.ciphertext,
+                    &statement.ek,
+                    &local_key.h1_h2_n_tilde_vec[i],
+                ) {
+                    return Err(FsDkrError::RangeProof { party_index: i });
+                }
             }
         }
 
@@ -262,6 +291,13 @@ impl<P> RefreshMessage<P> {
             {
                 return Err(FsDkrError::PaillierVerificationError {
                     party_index: refresh_message.party_index,
+                });
+            }
+            let n_length = refresh_message.ek.n.bit_length();
+            if n_length > crate::PAILLIER_KEY_SIZE || n_length < crate::PAILLIER_KEY_SIZE - 1 {
+                return Err(FsDkrError::MouliTooSmall {
+                    party_index: refresh_message.party_index,
+                    moduli_size: n_length,
                 });
             }
 
@@ -291,6 +327,14 @@ impl<P> RefreshMessage<P> {
                     .is_err()
             {
                 return Err(FsDkrError::DLogProofValidation { party_index });
+            }
+
+            let n_length = join_message.ek.n.bit_length();
+            if n_length > crate::PAILLIER_KEY_SIZE || n_length < crate::PAILLIER_KEY_SIZE - 1 {
+                return Err(FsDkrError::MouliTooSmall {
+                    party_index: join_message.get_party_index()?,
+                    moduli_size: n_length,
+                });
             }
 
             // if the proof checks, we add the new paillier public key to the key

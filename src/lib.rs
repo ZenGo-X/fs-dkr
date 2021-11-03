@@ -16,6 +16,9 @@
 
 pub mod add_party_message;
 pub mod error;
-pub mod proof_of_fairness;
+pub mod range_proofs;
 pub mod refresh_message;
 mod test;
+pub mod zk_pdl_with_slack;
+
+pub(crate) const PAILLIER_KEY_SIZE: usize = 2048;

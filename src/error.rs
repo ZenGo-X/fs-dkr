@@ -15,18 +15,28 @@ pub enum FsDkrError {
     #[error("Shares did not pass verification.")]
     PublicShareValidationError,
 
-    #[error("SizeMismatch error for the refresh message {refresh_message_index:?} - Fairness proof length: {fairness_proof_len:?}, Points Commited Length: {points_commited_len:?}, Points Encrypted Length: {points_encrypted_len:?}")]
+    #[error("SizeMismatch error for the refresh message {refresh_message_index:?} - pdl proof length: {pdl_proof_len:?}, Points Commited Length: {points_commited_len:?}, Points Encrypted Length: {points_encrypted_len:?}")]
     SizeMismatchError {
         refresh_message_index: usize,
-        fairness_proof_len: usize,
+        pdl_proof_len: usize,
         points_commited_len: usize,
         points_encrypted_len: usize,
     },
 
-    #[error("Fairness proof verification failed, results - T_add_e_Y == z_G: {t_add_eq_z_g:?} - e_u_add_c_e == enc_z_w: {e_u_add_eq_z_w:?}")]
-    FairnessProof {
-        t_add_eq_z_g: bool,
-        e_u_add_eq_z_w: bool,
+    #[error("PDLwSlack proof verification failed, results: u1 == u1_test: {is_u1_eq:?}, u2 == u2_test: {is_u2_eq:?}, u3 == u3_test: {is_u3_eq:?}")]
+    PDLwSlackProof {
+        is_u1_eq: bool,
+        is_u2_eq: bool,
+        is_u3_eq: bool,
+    },
+
+    #[error("Range Proof failed for party: {party_index:?}")]
+    RangeProof { party_index: usize },
+
+    #[error("The Paillier moduli size of party: {party_index:?} is {moduli_size:?} bits, when it should be 2047-2048 bits")]
+    MouliTooSmall {
+        party_index: usize,
+        moduli_size: usize,
     },
 
     #[error("Paillier verification proof failed for party {party_index:?}")]
