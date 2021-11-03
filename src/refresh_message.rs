@@ -40,6 +40,7 @@ impl<P> RefreshMessage<P> {
         P: ECPoint + Clone + Zeroize,
         P::Scalar: PartialEq + Clone + Debug + Zeroize,
     {
+        assert!(local_key.t <= local_key.n / 2);
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
         let (vss_scheme, secret_shares) =
