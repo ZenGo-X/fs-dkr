@@ -212,7 +212,7 @@ impl<P> RefreshMessage<P> {
         for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
             key.paillier_key_vec[party_index - 1] = join_message.ek.clone();
-            key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement_base_h1.clone();
+            key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement.clone();
         }
 
         Ok(RefreshMessage::distribute(key))
@@ -281,13 +281,19 @@ impl<P> RefreshMessage<P> {
                 return Err(FsDkrError::PaillierVerificationError { party_index });
             }
 
+            // creating an inverse dlog statement
+            let dlog_statement_base_h2 = DLogStatement {
+                N: join_message.dlog_statement.N.clone(),
+                g: join_message.dlog_statement.ni.clone(),
+                ni: join_message.dlog_statement.g.clone(),
+            };
             if join_message
                 .composite_dlog_proof_base_h1
-                .verify(&join_message.dlog_statement_base_h1)
+                .verify(&join_message.dlog_statement)
                 .is_err()
                 || join_message
                     .composite_dlog_proof_base_h2
-                    .verify(&join_message.dlog_statement_base_h2)
+                    .verify(&dlog_statement_base_h2)
                     .is_err()
             {
                 return Err(FsDkrError::DLogProofValidation { party_index });
