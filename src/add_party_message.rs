@@ -1,6 +1,6 @@
 //! Message definitions for new parties that can join the protocol
 //! Key points about a new party joining the refresh protocol:
-//! * A new party wants to join, broadcasting a pailier ek, correctness of the ek generation,
+//! * A new party wants to join, broadcasting a paillier ek, correctness of the ek generation,
 //! dlog statements and dlog proofs.
 //! * All the existing parties receives the join message. We assume for now that everyone accepts
 //! the new party. All parties pick an index and add the new ek to their LocalKey at the given index.
@@ -95,10 +95,10 @@ fn generate_dlog_statement_proofs() -> (
 
 impl JoinMessage {
     /// The distribute phase for a new party. This distribute phase has to happen before the existing
-    /// parties distribute. Calling this function will generate a JoinMessage and a pair of Pailier
+    /// parties distribute. Calling this function will generate a JoinMessage and a pair of Paillier
     /// [Keys] that are going to be used when generating the [LocalKey].
     pub fn distribute() -> (Self, Keys) {
-        let pailier_key_pair = Keys::create(0);
+        let paillier_key_pair = Keys::create(0);
         let (
             dlog_statement_base_h1,
             dlog_statement_base_h2,
@@ -108,8 +108,8 @@ impl JoinMessage {
 
         let join_message = JoinMessage {
             // in a join message, we only care about the ek and the correctness proof
-            ek: pailier_key_pair.ek.clone(),
-            dk_correctness_proof: NiCorrectKeyProof::proof(&pailier_key_pair.dk, None),
+            ek: paillier_key_pair.ek.clone(),
+            dk_correctness_proof: NiCorrectKeyProof::proof(&paillier_key_pair.dk, None),
             dlog_statement_base_h1,
             dlog_statement_base_h2,
             composite_dlog_proof_base_h1,
@@ -117,7 +117,7 @@ impl JoinMessage {
             party_index: None,
         };
 
-        (join_message, pailier_key_pair)
+        (join_message, paillier_key_pair)
     }
     /// Returns the party index if it has been assigned one, throws
     /// [FsDkrError::NewPartyUnassignedIndexError] otherwise

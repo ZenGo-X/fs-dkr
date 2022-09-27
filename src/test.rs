@@ -111,7 +111,7 @@ mod tests {
                     .unzip()
             }
 
-            // each party that wants to join generates a join message and a pair of pailier keys.
+            // each party that wants to join generates a join message and a pair of paillier keys.
             let (mut join_messages, new_keys) =
                 generate_join_messages_and_keys(party_indices.len());
 
