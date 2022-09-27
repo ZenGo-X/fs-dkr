@@ -16,8 +16,7 @@ package = "kzen-paillier"
 default-features = false
 
 [dependencies.multi-party-ecdsa]
-# git = "https://github.com/webb-tools/multi-party-ecdsa"
-path = "../multi-party-ecdsa"
+git = "https://github.com/webb-tools/multi-party-ecdsa"
 default-features = false
 
 [dependencies]
