@@ -1,17 +1,15 @@
 #![allow(non_snake_case)]
 use crate::error::{FsDkrError, FsDkrResult};
 
-use curv::BigInt;
+use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
+use curv::{BigInt, HashChoice};
 use paillier::Paillier;
 use paillier::{Add, EncryptWithChosenRandomness, Mul, RawCiphertext};
 use paillier::{EncryptionKey, Randomness, RawPlaintext};
 
-use curv::arithmetic::{Modulo, Samplable};
-use curv::cryptographic_primitives::hashing::hash_sha256::HSha256;
-use curv::cryptographic_primitives::hashing::traits::Hash;
-use curv::elliptic::curves::traits::*;
+use curv::arithmetic::{Converter, Modulo, Samplable};
+use curv::elliptic::curves::*;
 use serde::{Deserialize, Serialize};
-use zeroize::Zeroize;
 
 /// non interactive proof of fairness, taken from <https://hal.inria.fr/inria-00565274/document>
 
@@ -33,32 +31,30 @@ use zeroize::Zeroize;
 /// n = 2048, |x| < 256, |e| < 256
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct FairnessProof<P> {
+pub struct FairnessProof<E: Curve, H: Digest + Clone> {
     pub e_u: BigInt,
-    pub T: P,
+    pub T: Point<E>,
     pub z: BigInt,
     pub w: BigInt,
+    #[serde(skip)]
+    pub hash_choice: HashChoice<H>,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct FairnessWitness<S: ECScalar> {
-    pub x: S,
+pub struct FairnessWitness<E: Curve = Secp256k1> {
+    pub x: Scalar<E>,
     pub r: BigInt,
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct FairnessStatement<P> {
+pub struct FairnessStatement<E: Curve = Secp256k1> {
     pub ek: EncryptionKey,
     pub c: BigInt,
-    pub Y: P,
+    pub Y: Point<E>,
 }
 
-impl<P> FairnessProof<P>
-where
-    P: ECPoint + Clone + Zeroize,
-    P::Scalar: PartialEq + Clone + Zeroize,
-{
-    pub fn prove(witness: &FairnessWitness<P::Scalar>, statement: &FairnessStatement<P>) -> Self {
+impl<E: Curve, H: Digest + Clone> FairnessProof<E, H> {
+    pub fn prove(witness: &FairnessWitness<E>, statement: &FairnessStatement<E>) -> Self {
         let u = BigInt::sample_below(&statement.ek.n);
         let s = BigInt::sample_below(&statement.ek.n);
 
@@ -69,35 +65,37 @@ where
         )
         .0
         .into_owned();
-        let u_fe: P::Scalar = ECScalar::from(&u);
-        let T = P::generator() * u_fe;
+        let u_fe: Scalar<E> = Scalar::<E>::from(&u);
+        let T = Point::<E>::generator() * u_fe;
 
-        let e = HSha256::create_hash(&[
-            &T.bytes_compressed_to_big_int(),
-            &e_u,
-            &statement.c,
-            &statement.ek.n,
-            &statement.Y.bytes_compressed_to_big_int(),
-        ]);
+        let e = H::new()
+            .chain_bigint(&BigInt::from_bytes(&T.to_bytes(true)))
+            .chain_bigint(&e_u)
+            .chain_bigint(&statement.c)
+            .chain_bigint(&statement.ek.n)
+            .chain_bigint(&BigInt::from_bytes(&statement.Y.to_bytes(true)))
+            .result_bigint();
 
-        let z = u + &e * &witness.x.to_big_int();
+        let z = u + &e * &witness.x.to_bigint();
         let r_x_e = BigInt::mod_pow(&witness.r, &e, &statement.ek.nn);
         let w = BigInt::mod_mul(&r_x_e, &s, &statement.ek.nn);
-        FairnessProof { e_u, T, z, w }
+        FairnessProof {
+            e_u,
+            T,
+            z,
+            w,
+            hash_choice: HashChoice::new(),
+        }
     }
 
-    pub fn verify(&self, statement: &FairnessStatement<P>) -> FsDkrResult<()>
-    where
-        P: ECPoint + Clone + Zeroize,
-        P::Scalar: PartialEq + Clone + Zeroize,
-    {
-        let e = HSha256::create_hash(&[
-            &self.T.bytes_compressed_to_big_int(),
-            &self.e_u,
-            &statement.c,
-            &statement.ek.n,
-            &statement.Y.bytes_compressed_to_big_int(),
-        ]);
+    pub fn verify(&self, statement: &FairnessStatement<E>) -> FsDkrResult<()> {
+        let e = H::new()
+            .chain_bigint(&BigInt::from_bytes(&self.T.to_bytes(true)))
+            .chain_bigint(&self.e_u)
+            .chain_bigint(&statement.c)
+            .chain_bigint(&statement.ek.n)
+            .chain_bigint(&BigInt::from_bytes(&statement.Y.to_bytes(true)))
+            .result_bigint();
 
         let enc_z_w = Paillier::encrypt_with_chosen_randomness(
             &statement.ek,
@@ -115,9 +113,9 @@ where
             .0
             .into_owned();
 
-        let z_fe: P::Scalar = ECScalar::from(&self.z);
-        let z_G = P::generator() * z_fe;
-        let e_fe: P::Scalar = ECScalar::from(&e);
+        let z_fe: Scalar<E> = Scalar::<E>::from(&self.z);
+        let z_G = Point::<E>::generator() * z_fe;
+        let e_fe: Scalar<E> = Scalar::<E>::from(&e);
         let e_Y = statement.Y.clone() * e_fe;
         let T_add_e_Y = e_Y + self.T.clone();
 
@@ -135,18 +133,22 @@ where
 mod tests {
     use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
     use curv::arithmetic::{One, Samplable};
-    use curv::elliptic::curves::secp256_k1::{FE, GE};
-    use curv::elliptic::curves::traits::{ECPoint, ECScalar};
+    use curv::elliptic::curves::Secp256k1;
+    use curv::elliptic::curves::{Point, Scalar};
     use curv::BigInt;
     use paillier::{
         EncryptWithChosenRandomness, KeyGeneration, Paillier, Randomness, RawPlaintext,
     };
+    use sha2::Sha256;
+
+    type GE = Point<Secp256k1>;
+    type FE = Scalar<Secp256k1>;
 
     #[test]
     fn test_fairness_proof() {
         let (ek, _) = Paillier::keypair().keys();
-        let x: FE = ECScalar::new_random();
-        let x_bn = x.to_big_int();
+        let x: FE = FE::random();
+        let x_bn = x.to_bigint();
         let r = BigInt::sample_below(&ek.n);
 
         let c = Paillier::encrypt_with_chosen_randomness(
@@ -157,13 +159,13 @@ mod tests {
         .0
         .into_owned();
 
-        let Y = GE::generator() * x;
+        let Y = GE::generator() * x.clone();
 
         let witness = FairnessWitness { x, r };
 
         let statement = FairnessStatement { ek, c, Y };
 
-        let proof = FairnessProof::prove(&witness, &statement);
+        let proof = FairnessProof::<_, Sha256>::prove(&witness, &statement);
         let verify = proof.verify(&statement);
         assert!(verify.is_ok());
     }
@@ -172,8 +174,8 @@ mod tests {
     #[test]
     fn test_bad_fairness_proof() {
         let (ek, _) = Paillier::keypair().keys();
-        let x: FE = ECScalar::new_random();
-        let x_bn = x.to_big_int();
+        let x: FE = FE::random();
+        let x_bn = x.to_bigint();
         let r = BigInt::sample_below(&ek.n);
 
         let c = Paillier::encrypt_with_chosen_randomness(
@@ -184,13 +186,13 @@ mod tests {
         .0
         .into_owned();
 
-        let Y = GE::generator() * x;
+        let Y = GE::generator() * x.clone();
 
         let witness = FairnessWitness { x, r };
 
         let statement = FairnessStatement { ek, c, Y };
 
-        let proof = FairnessProof::prove(&witness, &statement);
+        let proof = FairnessProof::<_, Sha256>::prove(&witness, &statement);
         let verify = proof.verify(&statement);
         assert!(verify.is_ok());
     }

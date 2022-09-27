@@ -13,10 +13,11 @@
 use crate::error::{FsDkrError, FsDkrResult};
 use crate::refresh_message::RefreshMessage;
 use curv::arithmetic::{BasicOps, Modulo, One, Samplable, Zero};
+use curv::cryptographic_primitives::hashing::Digest;
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
-use curv::elliptic::curves::traits::{ECPoint, ECScalar};
+use curv::elliptic::curves::{Curve, Point, Scalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Keys;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SharedKeys;
@@ -25,14 +26,13 @@ use paillier::{Decrypt, EncryptionKey, KeyGeneration, Paillier};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use zeroize::Zeroize;
-use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NICorrectKeyProof};
+use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NiCorrectKeyProof};
 
 /// Message used by new parties to join the protocol.
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct JoinMessage {
     pub(crate) ek: EncryptionKey,
-    pub(crate) dk_correctness_proof: NICorrectKeyProof,
+    pub(crate) dk_correctness_proof: NiCorrectKeyProof,
     pub(crate) party_index: Option<usize>,
     pub(crate) dlog_statement_base_h1: DLogStatement,
     pub(crate) dlog_statement_base_h2: DLogStatement,
@@ -109,7 +109,7 @@ impl JoinMessage {
         let join_message = JoinMessage {
             // in a join message, we only care about the ek and the correctness proof
             ek: pailier_key_pair.ek.clone(),
-            dk_correctness_proof: NICorrectKeyProof::proof(&pailier_key_pair.dk, None),
+            dk_correctness_proof: NiCorrectKeyProof::proof(&pailier_key_pair.dk, None),
             dlog_statement_base_h1,
             dlog_statement_base_h2,
             composite_dlog_proof_base_h1,
@@ -130,17 +130,17 @@ impl JoinMessage {
     /// tailored for a sent JoinMessage on which we assigned party_index. In this collect, a [LocalKey]
     /// is filled with the information provided by the [RefreshMessage]s from the other parties and
     /// the other join messages (multiple parties can be added/replaced at once).
-    pub fn collect<P>(
+    pub fn collect<E, H>(
         &self,
-        refresh_messages: &[RefreshMessage<P>],
+        refresh_messages: &[RefreshMessage<E, H>],
         paillier_key: Keys,
         join_messages: &[JoinMessage],
         t: usize,
         n: usize,
-    ) -> FsDkrResult<LocalKey<P>>
+    ) -> FsDkrResult<LocalKey<E>>
     where
-        P: ECPoint + Clone + Zeroize + Debug,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
+        E: Curve,
+        H: Digest + Clone,
     {
         RefreshMessage::validate_collect(refresh_messages, t, n)?;
 
@@ -154,8 +154,8 @@ impl JoinMessage {
         }
 
         let parameters = ShamirSecretSharing {
-            threshold: t,
-            share_count: n,
+            threshold: t as u16,
+            share_count: n as u16,
         };
 
         // generate a new share, the details can be found here https://hackmd.io/@omershlo/Hy1jBo6JY.
@@ -169,10 +169,10 @@ impl JoinMessage {
             .0
             .into_owned();
 
-        let new_share_fe: P::Scalar = ECScalar::from(&new_share);
+        let new_share_fe: Scalar<E> = Scalar::<E>::from(&new_share);
         let paillier_dk = paillier_key.dk.clone();
         let key_linear_x_i = new_share_fe.clone();
-        let key_linear_y = P::generator() * new_share_fe.clone();
+        let key_linear_y = Point::<E>::generator() * new_share_fe.clone();
         let keys_linear = SharedKeys {
             x_i: key_linear_x_i,
             y: key_linear_y,
@@ -251,7 +251,7 @@ impl JoinMessage {
         }
 
         // generate the vss_scheme for the LocalKey
-        let (vss_scheme, _) = VerifiableSS::<P>::share(t, n, &new_share_fe);
+        let (vss_scheme, _) = VerifiableSS::<E>::share(t as u16, n as u16, &new_share_fe);
         // TODO: secret cleanup might be needed.
 
         let local_key = LocalKey {
