@@ -2,7 +2,7 @@ use thiserror::Error;
 
 pub type FsDkrResult<T> = Result<T, FsDkrError>;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum FsDkrError {
     #[error("Too many malicious parties detected! Threshold {threshold:?}, Number of Refreshed Messages: {refreshed_keys:?}, Malicious parties detected when trying to refresh: malicious_parties:?")]
     PartiesThresholdViolation {
