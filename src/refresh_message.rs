@@ -22,7 +22,7 @@ use zeroize::{DefaultIsZeroes, Zeroize};
 use zk_paillier::zkproofs::{DLogStatement, NiCorrectKeyProof, SALT_STRING};
 
 // Everything here can be broadcasted
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
     pub(crate) party_index: usize,
     fairness_proof_vec: Vec<FairnessProof<E, H>>,
