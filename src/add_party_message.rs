@@ -33,7 +33,7 @@ use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NiCorrectKeyProof
 pub struct JoinMessage {
     pub(crate) ek: EncryptionKey,
     pub(crate) dk_correctness_proof: NiCorrectKeyProof,
-    pub(crate) party_index: Option<usize>,
+    pub(crate) party_index: Option<u16>,
     pub(crate) dlog_statement_base_h1: DLogStatement,
     pub(crate) dlog_statement_base_h2: DLogStatement,
     pub(crate) composite_dlog_proof_base_h1: CompositeDLogProof,
@@ -121,7 +121,7 @@ impl JoinMessage {
     }
     /// Returns the party index if it has been assigned one, throws
     /// [FsDkrError::NewPartyUnassignedIndexError] otherwise
-    pub fn get_party_index(&self) -> FsDkrResult<usize> {
+    pub fn get_party_index(&self) -> FsDkrResult<u16> {
         self.party_index
             .ok_or(FsDkrError::NewPartyUnassignedIndexError)
     }
@@ -135,8 +135,8 @@ impl JoinMessage {
         refresh_messages: &[RefreshMessage<E, H>],
         paillier_key: Keys,
         join_messages: &[JoinMessage],
-        t: usize,
-        n: usize,
+        t: u16,
+        n: u16,
     ) -> FsDkrResult<LocalKey<E>>
     where
         E: Curve,
@@ -154,8 +154,8 @@ impl JoinMessage {
         }
 
         let parameters = ShamirSecretSharing {
-            threshold: t as u16,
-            share_count: n as u16,
+            threshold: t,
+            share_count: n,
         };
 
         // generate a new share, the details can be found here https://hackmd.io/@omershlo/Hy1jBo6JY.
@@ -177,12 +177,12 @@ impl JoinMessage {
             x_i: key_linear_x_i,
             y: key_linear_y,
         };
-        let mut pk_vec: Vec<_> = (0..n)
+        let mut pk_vec: Vec<_> = (0..n as usize)
             .map(|i| refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone())
             .collect();
 
         for i in 0..n as usize {
-            for j in 1..(t as usize + 1) {
+            for j in 1..(t + 1) as usize {
                 pk_vec[i] = pk_vec[i].clone()
                     + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
             }
@@ -190,7 +190,7 @@ impl JoinMessage {
 
         // check what parties are assigned in the current rotation and associate their paillier
         // ek to each available party index.
-        let available_parties: HashMap<usize, &EncryptionKey> = refresh_messages
+        let available_parties: HashMap<u16, &EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.ek))
             .chain(std::iter::once((party_index, &paillier_key.ek)))
@@ -204,7 +204,7 @@ impl JoinMessage {
         // TODO: submit the statement the dlog proof as well!
         // check what parties are assigned in the current rotation and associate their DLogStatements
         // and check their CompositeDlogProofs.
-        let available_h1_h2_ntilde_vec: HashMap<usize, &DLogStatement> = refresh_messages
+        let available_h1_h2_ntilde_vec: HashMap<u16, &DLogStatement> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.dlog_statement))
             .chain(std::iter::once((party_index, &self.dlog_statement_base_h1)))
@@ -251,7 +251,7 @@ impl JoinMessage {
         }
 
         // generate the vss_scheme for the LocalKey
-        let (vss_scheme, _) = VerifiableSS::<E>::share(t as u16, n as u16, &new_share_fe);
+        let (vss_scheme, _) = VerifiableSS::<E>::share(t, n, &new_share_fe);
         // TODO: secret cleanup might be needed.
 
         let local_key = LocalKey {
@@ -262,9 +262,9 @@ impl JoinMessage {
             y_sum_s: refresh_messages[0].public_key.clone(),
             h1_h2_n_tilde_vec: h1_h2_ntilde_vec,
             vss_scheme,
-            i: party_index as u16,
-            t: t as u16,
-            n: n as u16,
+            i: party_index,
+            t: t,
+            n: n,
         };
 
         Ok(local_key)

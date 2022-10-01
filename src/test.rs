@@ -47,8 +47,8 @@ mod tests {
         let indices: Vec<_> = (0..(t + 1) as u16).collect();
         let vss = VerifiableSS::<Secp256k1> {
             parameters: ShamirSecretSharing {
-                threshold: t as u16,
-                share_count: n as u16,
+                threshold: t,
+                share_count: n,
             },
             commitments: Vec::new(),
         };
@@ -89,9 +89,9 @@ mod tests {
     fn test_add_party() {
         fn simulate_replace(
             keys: &mut Vec<LocalKey<Secp256k1>>,
-            party_indices: &[usize],
-            t: usize,
-            n: usize,
+            party_indices: &[u16],
+            t: u16,
+            n: u16,
         ) -> FsDkrResult<()> {
             fn generate_join_messages_and_keys(
                 number_of_new_parties: usize,
@@ -147,7 +147,7 @@ mod tests {
                     n,
                 )?;
 
-                keys.insert(party_index - 1, local_key);
+                keys.insert((party_index - 1) as usize, local_key);
             }
 
             Ok(())
@@ -158,8 +158,30 @@ mod tests {
 
         let all_keys = simulate_keygen(t, n);
         let mut keys = all_keys[0..5].to_vec();
+        // check that sum of old keys is equal to sum of new keys
+        let old_linear_secret_key: Vec<_> = (0..keys.len())
+            .map(|i| keys[i].keys_linear.x_i.clone())
+            .collect();
 
-        simulate_replace(&mut keys, &[2, 7], t as usize, n as usize).unwrap();
+        simulate_replace(&mut keys, &[2, 7], t, n).unwrap();
+
+        let new_linear_secret_key: Vec<_> = (0..keys.len())
+            .map(|i| keys[i].keys_linear.x_i.clone())
+            .collect();
+        let indices: Vec<_> = (0..(t + 1) as u16).collect();
+        let vss = VerifiableSS::<Secp256k1> {
+            parameters: ShamirSecretSharing {
+                threshold: t,
+                share_count: n,
+            },
+            commitments: Vec::new(),
+        };
+        assert_eq!(
+            vss.reconstruct(&indices[..], &old_linear_secret_key[0..(t + 1) as usize]),
+            vss.reconstruct(&indices[..], &new_linear_secret_key[0..(t + 1) as usize])
+        );
+        assert_ne!(old_linear_secret_key, new_linear_secret_key);
+
         let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
     }
@@ -186,20 +208,21 @@ mod tests {
         for key in keys.iter_mut() {
             let (refresh_message, new_dk) = RefreshMessage::distribute(key);
             refresh_messages.push(refresh_message.clone());
-            new_dks.insert(refresh_message.party_index, new_dk);
-            party_key.insert(refresh_message.party_index, key.clone());
+            new_dks.insert(refresh_message.party_index.into(), new_dk);
+            party_key.insert(refresh_message.party_index.into(), key.clone());
         }
 
         for refresh_message in refresh_messages.iter() {
-            broadcast_messages.insert(refresh_message.party_index, Vec::new());
+            broadcast_messages.insert(refresh_message.party_index.into(), Vec::new());
         }
 
         for refresh_message in refresh_messages.iter_mut() {
-            if !remove_party_indices.contains(&refresh_message.party_index) {
+            if !remove_party_indices.contains(&refresh_message.party_index.into()) {
                 refresh_message.remove_party_indices = remove_party_indices.clone();
             } else {
                 let mut new_remove_party_indices = remove_party_indices.clone();
-                new_remove_party_indices.retain(|value| *value != refresh_message.party_index);
+                new_remove_party_indices
+                    .retain(|value| *value != refresh_message.party_index.into());
                 refresh_message.remove_party_indices = new_remove_party_indices;
             }
 
