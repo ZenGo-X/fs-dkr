@@ -159,8 +159,8 @@ mod tests {
         let all_keys = simulate_keygen(t, n);
         let mut keys = all_keys[0..5].to_vec();
 
-        simulate_replace(&mut keys, &[6, 7], t as usize, n as usize).unwrap();
-        let offline_sign = simulate_offline_stage(keys, &[1, 6, 7]);
+        simulate_replace(&mut keys, &[2, 7], t as usize, n as usize).unwrap();
+        let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
     }
 
