@@ -157,30 +157,26 @@ mod tests {
         let n = 7;
 
         let all_keys = simulate_keygen(t, n);
-        let mut keys = all_keys[0..5].to_vec();
-        // check that sum of old keys is equal to sum of new keys
-        let old_linear_secret_key: Vec<_> = (0..keys.len())
-            .map(|i| keys[i].keys_linear.x_i.clone())
-            .collect();
+        // Remove the 2nd and 7th party
+        let mut keys = Vec::<LocalKey<Secp256k1>>::new();
+        // Add 1st party
+        keys.push(all_keys[0].clone());
+        assert_eq!(keys[0].i, 1);
+        // Add 3rd party
+        keys.push(all_keys[2].clone());
+        assert_eq!(keys[1].i, 3);
+        // Add 4th party
+        keys.push(all_keys[3].clone());
+        assert_eq!(keys[2].i, 4);
+        // Add 5th party
+        keys.push(all_keys[4].clone());
+        assert_eq!(keys[3].i, 5);
+        // Add 6th party
+        keys.push(all_keys[5].clone());
+        assert_eq!(keys[4].i, 6);
 
+        // Simulate the replace
         simulate_replace(&mut keys, &[2, 7], t, n).unwrap();
-
-        let new_linear_secret_key: Vec<_> = (0..keys.len())
-            .map(|i| keys[i].keys_linear.x_i.clone())
-            .collect();
-        let indices: Vec<_> = (0..(t + 1) as u16).collect();
-        let vss = VerifiableSS::<Secp256k1> {
-            parameters: ShamirSecretSharing {
-                threshold: t,
-                share_count: n,
-            },
-            commitments: Vec::new(),
-        };
-        assert_eq!(
-            vss.reconstruct(&indices[..], &old_linear_secret_key[0..(t + 1) as usize]),
-            vss.reconstruct(&indices[..], &new_linear_secret_key[0..(t + 1) as usize])
-        );
-        assert_ne!(old_linear_secret_key, new_linear_secret_key);
 
         let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
