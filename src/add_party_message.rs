@@ -33,7 +33,7 @@ use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NiCorrectKeyProof
 pub struct JoinMessage {
     pub(crate) ek: EncryptionKey,
     pub(crate) dk_correctness_proof: NiCorrectKeyProof,
-    pub party_index: Option<u16>,
+    pub(crate) party_index: Option<u16>,
     pub(crate) dlog_statement_base_h1: DLogStatement,
     pub(crate) dlog_statement_base_h2: DLogStatement,
     pub(crate) composite_dlog_proof_base_h1: CompositeDLogProof,
@@ -94,6 +94,9 @@ fn generate_dlog_statement_proofs() -> (
 }
 
 impl JoinMessage {
+    pub fn set_party_index(&mut self, new_party_index: u16) {
+        self.party_index = Some(new_party_index);
+    }
     /// The distribute phase for a new party. This distribute phase has to happen before the existing
     /// parties distribute. Calling this function will generate a JoinMessage and a pair of Paillier
     /// [Keys] that are going to be used when generating the [LocalKey].
