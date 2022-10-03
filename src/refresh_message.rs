@@ -216,13 +216,14 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<E>,
         new_dk: DecryptionKey,
+        new_n: u16,
         join_messages: &[JoinMessage],
     ) -> FsDkrResult<()> {
-        RefreshMessage::validate_collect(refresh_messages, local_key.t, local_key.n)?;
+        RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n)?;
 
         let mut statement: FairnessStatement<E>;
         for refresh_message in refresh_messages.iter() {
-            for i in 0..local_key.n as usize {
+            for i in 0..new_n as usize {
                 statement = FairnessStatement {
                     ek: local_key.paillier_key_vec[i].clone(),
                     c: refresh_message.points_encrypted_vec[i].clone(),
@@ -299,7 +300,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         local_key.keys_linear.y = Point::<E>::generator() * new_share_fe;
 
         // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
-        for i in 0..local_key.n as usize {
+        for i in 0..new_n as usize {
             local_key.pk_vec[i] =
                 refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone();
             for j in 1..local_key.t as usize + 1 {
