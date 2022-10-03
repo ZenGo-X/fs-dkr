@@ -200,6 +200,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
     pub fn replace(
         new_parties: &[JoinMessage],
         key: &mut LocalKey<E>,
+        new_n: u16,
     ) -> FsDkrResult<(Self, DecryptionKey)> {
         for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
@@ -208,7 +209,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 
         }
 
-        RefreshMessage::distribute(key, new_parties.len() as u16)
+        RefreshMessage::distribute(key, new_n as u16)
     }
 
     pub fn collect(
