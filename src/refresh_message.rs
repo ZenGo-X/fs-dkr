@@ -39,11 +39,14 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
 }
 
 impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
-    pub fn distribute(local_key: &LocalKey<E>, num_of_new_parties: u16) -> (Self, DecryptionKey) {
+    pub fn distribute(local_key: &LocalKey<E>, new_n: u16) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
+        if new_n <= local_key.t {
+            return Err(FsDkrError::NewPartyUnassignedIndexError);
+        }
         let (vss_scheme, secret_shares) =
-            VerifiableSS::<E>::share(local_key.t, local_key.n + num_of_new_parties, &secret);
+            VerifiableSS::<E>::share(local_key.t, new_n, &secret);
 
         // commit to points on the polynomial
         let points_committed_vec: Vec<_> = (0..secret_shares.len())
@@ -84,7 +87,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         let (ek, dk) = Paillier::keypair().keys();
         let dk_correctness_proof = NiCorrectKeyProof::proof(&dk, None);
 
-        (
+        Ok((
             RefreshMessage {
                 party_index: local_key.i,
                 fairness_proof_vec,
@@ -99,7 +102,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 hash_choice: HashChoice::new(),
             },
             dk,
-        )
+        ))
     }
 
     pub fn validate_collect(refresh_messages: &[Self], t: u16, n: u16) -> FsDkrResult<()> {
@@ -205,7 +208,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 
         }
 
-        Ok(RefreshMessage::distribute(key, new_parties.len() as u16))
+        RefreshMessage::distribute(key, new_parties.len() as u16)
     }
 
     pub fn collect(
