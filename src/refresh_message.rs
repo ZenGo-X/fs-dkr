@@ -300,7 +300,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         local_key.keys_linear.y = Point::<E>::generator() * new_share_fe;
 
         // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
-        for i in 0..new_n as usize {
+        for i in 0..refresh_messages.len() as usize {
             local_key.pk_vec[i] =
                 refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone();
             for j in 1..local_key.t as usize + 1 {
