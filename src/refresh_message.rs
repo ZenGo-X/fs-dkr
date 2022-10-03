@@ -200,9 +200,9 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
     ) -> FsDkrResult<(Self, DecryptionKey)> {
         for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
-            key.paillier_key_vec[(party_index - 1) as usize] = join_message.ek.clone();
-            key.h1_h2_n_tilde_vec[(party_index - 1) as usize] =
-                join_message.dlog_statement_base_h1.clone();
+            key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
+            key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
+                
         }
 
         Ok(RefreshMessage::distribute(key))
