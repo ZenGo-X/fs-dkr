@@ -216,10 +216,10 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<E>,
         new_dk: DecryptionKey,
-        new_n: u16,
         join_messages: &[JoinMessage],
     ) -> FsDkrResult<()> {
-        RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n)?;
+        let new_n = refresh_messages.len() + join_messages.len();
+        RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n as u16)?;
 
         let mut statement: FairnessStatement<E>;
         for refresh_message in refresh_messages.iter() {
