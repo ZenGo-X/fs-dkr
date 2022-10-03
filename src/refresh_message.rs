@@ -39,11 +39,11 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
 }
 
 impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
-    pub fn distribute(local_key: &LocalKey<E>) -> (Self, DecryptionKey) {
+    pub fn distribute(local_key: &LocalKey<E>, num_of_new_parties: u16) -> (Self, DecryptionKey) {
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
         let (vss_scheme, secret_shares) =
-            VerifiableSS::<E>::share(local_key.t, local_key.n, &secret);
+            VerifiableSS::<E>::share(local_key.t, local_key.n + num_of_new_parties, &secret);
 
         // commit to points on the polynomial
         let points_committed_vec: Vec<_> = (0..secret_shares.len())
@@ -205,7 +205,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 
         }
 
-        Ok(RefreshMessage::distribute(key))
+        Ok(RefreshMessage::distribute(key, new_parties.len() as u16))
     }
 
     pub fn collect(
