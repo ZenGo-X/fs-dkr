@@ -202,10 +202,19 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         key: &mut LocalKey<E>,
         new_n: u16,
     ) -> FsDkrResult<(Self, DecryptionKey)> {
+        let current_len = key.paillier_key_vec.len() as u16;
         for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
-            key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
-            key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
+            if party_index < current_len {
+                key.paillier_key_vec.remove((party_index - 1) as usize,);
+                key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
+                key.h1_h2_n_tilde_vec.remove((party_index - 1) as usize,);
+                key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
+            } else {
+                key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
+                key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
+            }
+
                 
         }
 
