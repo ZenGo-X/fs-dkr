@@ -196,6 +196,7 @@ impl JoinMessage {
         let available_parties: HashMap<u16, &EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.ek))
+            .chain(std::iter::once((party_index, &paillier_key.ek)))
             .chain(
                 join_messages
                     .iter()
@@ -203,12 +204,15 @@ impl JoinMessage {
             )
             .collect();
 
+        println!("available parties {:?}", available_parties.len());
+
         // TODO: submit the statement the dlog proof as well!
         // check what parties are assigned in the current rotation and associate their DLogStatements
         // and check their CompositeDlogProofs.
         let available_h1_h2_ntilde_vec: HashMap<u16, &DLogStatement> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.dlog_statement))
+            .chain(std::iter::once((party_index, &self.dlog_statement_base_h1)))
             .chain(join_messages.iter().map(|join_message| {
                 (
                     join_message.party_index.unwrap(),
