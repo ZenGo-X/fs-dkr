@@ -196,7 +196,6 @@ impl JoinMessage {
         let available_parties: HashMap<u16, &EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.ek))
-            .chain(std::iter::once((party_index, &paillier_key.ek)))
             .chain(
                 join_messages
                     .iter()
@@ -210,7 +209,6 @@ impl JoinMessage {
         let available_h1_h2_ntilde_vec: HashMap<u16, &DLogStatement> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.dlog_statement))
-            .chain(std::iter::once((party_index, &self.dlog_statement_base_h1)))
             .chain(join_messages.iter().map(|join_message| {
                 (
                     join_message.party_index.unwrap(),
