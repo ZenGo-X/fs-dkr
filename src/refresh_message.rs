@@ -167,6 +167,8 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         let indices: Vec<u16> = (0..(parameters.threshold + 1) as usize)
             .map(|i| refresh_messages[i].party_index - 1)
             .collect();
+        
+        println!("indices {:?}", indices);
 
         // optimization - one decryption
         let li_vec: Vec<_> = (0..parameters.threshold as usize + 1)
@@ -213,9 +215,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             } else {
                 key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
                 key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
-            }
-
-                
+            }      
         }
 
         RefreshMessage::distribute(key, new_n as u16)
