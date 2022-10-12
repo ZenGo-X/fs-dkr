@@ -1,6 +1,6 @@
 //! Message definitions for new parties that can join the protocol
 //! Key points about a new party joining the refresh protocol:
-//! * A new party wants to join, broadcasting a pailier ek, correctness of the ek generation,
+//! * A new party wants to join, broadcasting a paillier ek, correctness of the ek generation,
 //! dlog statements and dlog proofs.
 //! * All the existing parties receives the join message. We assume for now that everyone accepts
 //! the new party. All parties pick an index and add the new ek to their LocalKey at the given index.
@@ -13,10 +13,11 @@
 use crate::error::{FsDkrError, FsDkrResult};
 use crate::refresh_message::RefreshMessage;
 use curv::arithmetic::{BasicOps, Modulo, One, Samplable, Zero};
+use curv::cryptographic_primitives::hashing::Digest;
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
-use curv::elliptic::curves::traits::{ECPoint, ECScalar};
+use curv::elliptic::curves::{Curve, Point, Scalar};
 use curv::BigInt;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::Keys;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::party_i::SharedKeys;
@@ -25,15 +26,14 @@ use paillier::{Decrypt, EncryptionKey, KeyGeneration, Paillier};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
-use zeroize::Zeroize;
-use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NICorrectKeyProof};
+use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NiCorrectKeyProof};
 
 /// Message used by new parties to join the protocol.
 #[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct JoinMessage {
     pub(crate) ek: EncryptionKey,
-    pub(crate) dk_correctness_proof: NICorrectKeyProof,
-    pub(crate) party_index: Option<usize>,
+    pub(crate) dk_correctness_proof: NiCorrectKeyProof,
+    pub(crate) party_index: Option<u16>,
     pub(crate) dlog_statement_base_h1: DLogStatement,
     pub(crate) dlog_statement_base_h2: DLogStatement,
     pub(crate) composite_dlog_proof_base_h1: CompositeDLogProof,
@@ -94,11 +94,14 @@ fn generate_dlog_statement_proofs() -> (
 }
 
 impl JoinMessage {
+    pub fn set_party_index(&mut self, new_party_index: u16) {
+        self.party_index = Some(new_party_index);
+    }
     /// The distribute phase for a new party. This distribute phase has to happen before the existing
-    /// parties distribute. Calling this function will generate a JoinMessage and a pair of Pailier
+    /// parties distribute. Calling this function will generate a JoinMessage and a pair of Paillier
     /// [Keys] that are going to be used when generating the [LocalKey].
     pub fn distribute() -> (Self, Keys) {
-        let pailier_key_pair = Keys::create(0);
+        let paillier_key_pair = Keys::create(0);
         let (
             dlog_statement_base_h1,
             dlog_statement_base_h2,
@@ -108,8 +111,8 @@ impl JoinMessage {
 
         let join_message = JoinMessage {
             // in a join message, we only care about the ek and the correctness proof
-            ek: pailier_key_pair.ek.clone(),
-            dk_correctness_proof: NICorrectKeyProof::proof(&pailier_key_pair.dk, None),
+            ek: paillier_key_pair.ek.clone(),
+            dk_correctness_proof: NiCorrectKeyProof::proof(&paillier_key_pair.dk, None),
             dlog_statement_base_h1,
             dlog_statement_base_h2,
             composite_dlog_proof_base_h1,
@@ -117,11 +120,11 @@ impl JoinMessage {
             party_index: None,
         };
 
-        (join_message, pailier_key_pair)
+        (join_message, paillier_key_pair)
     }
     /// Returns the party index if it has been assigned one, throws
     /// [FsDkrError::NewPartyUnassignedIndexError] otherwise
-    pub fn get_party_index(&self) -> FsDkrResult<usize> {
+    pub fn get_party_index(&self) -> FsDkrResult<u16> {
         self.party_index
             .ok_or(FsDkrError::NewPartyUnassignedIndexError)
     }
@@ -130,17 +133,17 @@ impl JoinMessage {
     /// tailored for a sent JoinMessage on which we assigned party_index. In this collect, a [LocalKey]
     /// is filled with the information provided by the [RefreshMessage]s from the other parties and
     /// the other join messages (multiple parties can be added/replaced at once).
-    pub fn collect<P>(
+    pub fn collect<E, H>(
         &self,
-        refresh_messages: &[RefreshMessage<P>],
+        refresh_messages: &[RefreshMessage<E, H>],
         paillier_key: Keys,
         join_messages: &[JoinMessage],
-        t: usize,
-        n: usize,
-    ) -> FsDkrResult<LocalKey<P>>
+        t: u16,
+        n: u16,
+    ) -> FsDkrResult<LocalKey<E>>
     where
-        P: ECPoint + Clone + Zeroize + Debug,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
+        E: Curve,
+        H: Digest + Clone,
     {
         RefreshMessage::validate_collect(refresh_messages, t, n)?;
 
@@ -169,20 +172,20 @@ impl JoinMessage {
             .0
             .into_owned();
 
-        let new_share_fe: P::Scalar = ECScalar::from(&new_share);
+        let new_share_fe: Scalar<E> = Scalar::<E>::from(&new_share);
         let paillier_dk = paillier_key.dk.clone();
         let key_linear_x_i = new_share_fe.clone();
-        let key_linear_y = P::generator() * new_share_fe.clone();
+        let key_linear_y = Point::<E>::generator() * new_share_fe.clone();
         let keys_linear = SharedKeys {
             x_i: key_linear_x_i,
             y: key_linear_y,
         };
-        let mut pk_vec: Vec<_> = (0..n)
+        let mut pk_vec: Vec<_> = (0..n as usize)
             .map(|i| refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone())
             .collect();
 
         for i in 0..n as usize {
-            for j in 1..(t as usize + 1) {
+            for j in 1..(t + 1) as usize {
                 pk_vec[i] = pk_vec[i].clone()
                     + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
             }
@@ -190,7 +193,7 @@ impl JoinMessage {
 
         // check what parties are assigned in the current rotation and associate their paillier
         // ek to each available party index.
-        let available_parties: HashMap<usize, &EncryptionKey> = refresh_messages
+        let available_parties: HashMap<u16, &EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.ek))
             .chain(std::iter::once((party_index, &paillier_key.ek)))
@@ -201,10 +204,12 @@ impl JoinMessage {
             )
             .collect();
 
+        println!("available parties {:?}", available_parties.len());
+
         // TODO: submit the statement the dlog proof as well!
         // check what parties are assigned in the current rotation and associate their DLogStatements
         // and check their CompositeDlogProofs.
-        let available_h1_h2_ntilde_vec: HashMap<usize, &DLogStatement> = refresh_messages
+        let available_h1_h2_ntilde_vec: HashMap<u16, &DLogStatement> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.dlog_statement))
             .chain(std::iter::once((party_index, &self.dlog_statement_base_h1)))
@@ -251,7 +256,7 @@ impl JoinMessage {
         }
 
         // generate the vss_scheme for the LocalKey
-        let (vss_scheme, _) = VerifiableSS::<P>::share(t, n, &new_share_fe);
+        let (vss_scheme, _) = VerifiableSS::<E>::share(t, n, &new_share_fe);
         // TODO: secret cleanup might be needed.
 
         let local_key = LocalKey {
@@ -262,9 +267,9 @@ impl JoinMessage {
             y_sum_s: refresh_messages[0].public_key.clone(),
             h1_h2_n_tilde_vec: h1_h2_ntilde_vec,
             vss_scheme,
-            i: party_index as u16,
-            t: t as u16,
-            n: n as u16,
+            i: party_index,
+            t: t,
+            n: n,
         };
 
         Ok(local_key)
