@@ -613,6 +613,7 @@ impl SampleFromMultiplicativeGroup for BigInt {
 pub(crate) mod tests {
     use super::*;
     use curv::elliptic::curves::secp256_k1::{Secp256k1Point, Secp256k1Scalar};
+    use curv::elliptic::curves::{ECPoint, ECScalar};
     use paillier::traits::{Encrypt, EncryptWithChosenRandomness, KeyGeneration};
     use paillier::{Add, DecryptionKey, Mul, Paillier, RawCiphertext, RawPlaintext};
     use sha2::Sha256;
@@ -649,7 +650,7 @@ pub(crate) mod tests {
         let (dlog_statement, ek, _) = generate_init();
 
         // Alice's secret value
-        let a = FE::new_random().to_bigint();
+        let a = FE::random().to_bigint();
         let r = BigInt::from_paillier_key(&ek);
         let cipher = Paillier::encrypt_with_chosen_randomness(
             &ek,
@@ -660,7 +661,8 @@ pub(crate) mod tests {
         .clone()
         .into_owned();
 
-        let alice_proof = AliceProof::<GE, Sha256>::generate(&a, &cipher, &ek, &dlog_statement, &r);
+        let alice_proof =
+            AliceProof::<Secp256k1, Sha256>::generate(&a, &cipher, &ek, &dlog_statement, &r);
 
         assert!(alice_proof.verify(&cipher, &ek, &dlog_statement));
     }
@@ -675,14 +677,14 @@ pub(crate) mod tests {
             // run MtA protocol with different inputs
             (0..5).for_each(|_| {
                 // Simulate Alice
-                let a = FE::new_random().to_bigint();
+                let a = FE::random().to_bigint();
                 let encrypted_a = Paillier::encrypt(alice_public_key, RawPlaintext::from(a))
                     .0
                     .clone()
                     .into_owned();
 
                 // Bob follows MtA
-                let b = FE::new_random();
+                let b: Scalar<Secp256k1> = Scalar::<Secp256k1>::random();
                 // E(a) * b
                 let b_times_enc_a = Paillier::mul(
                     alice_public_key,
@@ -699,7 +701,7 @@ pub(crate) mod tests {
 
                 let mta_out = Paillier::add(alice_public_key, b_times_enc_a, enc_beta_prim);
 
-                let (bob_proof, _) = BobProof::<GE>::generate(
+                let (bob_proof, _) = BobProof::<Secp256k1, Sha256>::generate(
                     &encrypted_a,
                     &mta_out.0.clone().into_owned(),
                     &b,
@@ -718,9 +720,9 @@ pub(crate) mod tests {
                 ));
 
                 // Bob follows MtAwc
-                let ec_gen = GE::generator();
-                let X = ec_gen * b;
-                let bob_proof = BobProofExt::generate(
+                let ec_gen: Point<Secp256k1> = Point::<Secp256k1>::generator().to_point();
+                let X = ec_gen * b.clone();
+                let bob_proof = BobProofExt::<Secp256k1, Sha256>::generate(
                     &encrypted_a,
                     &mta_out.0.clone().into_owned(),
                     &b,

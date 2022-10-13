@@ -195,6 +195,7 @@ mod test {
     use paillier::traits::{EncryptWithChosenRandomness, KeyGeneration};
     use paillier::Paillier;
     use paillier::RawPlaintext;
+    use sha2::Sha256;
     use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement};
 
     type GE = Secp256k1Point;
@@ -227,9 +228,9 @@ mod test {
         // note: safe primes should be used here as well:
         // let (ek_tilde, dk_tilde) = Paillier::keypair_safe_primes().keys();
         let randomness = Randomness::sample(&ek);
-        let x: FE = Scalar::<E>::new_random();
+        let x: Scalar<Secp256k1> = Scalar::<Secp256k1>::random();
 
-        let Q = GE::generator() * &x;
+        let Q = Point::<Secp256k1>::generator().to_point() * &x;
 
         let c = Paillier::encrypt_with_chosen_randomness(
             &ek,
@@ -244,7 +245,7 @@ mod test {
             ciphertext: c,
             ek,
             Q,
-            G: GE::generator(),
+            G: Point::<Secp256k1>::generator().to_point(),
             h1,
             h2,
             N_tilde: ek_tilde.n,
@@ -252,7 +253,10 @@ mod test {
 
         let pdl_w_slack_witness = PDLwSlackWitness { x, r: randomness.0 };
 
-        let proof = PDLwSlackProof::prove(&pdl_w_slack_witness, &pdl_w_slack_statement);
+        let proof = PDLwSlackProof::<Secp256k1, Sha256>::prove(
+            &pdl_w_slack_witness,
+            &pdl_w_slack_statement,
+        );
         // verify h1,h2, N_tilde
         let setup_result = composite_dlog_proof.verify(&statement);
         assert!(setup_result.is_ok());
@@ -288,9 +292,9 @@ mod test {
         // note: safe primes should be used here as well:
         // let (ek_tilde, dk_tilde) = Paillier::keypair_safe_primes().keys();
         let randomness = Randomness::sample(&ek);
-        let x: FE = Scalar::<E>::new_random();
+        let x: Scalar<Secp256k1> = Scalar::<Secp256k1>::random();
 
-        let Q = GE::generator() * &x;
+        let Q = Point::<Secp256k1>::generator().to_point() * &x;
 
         // here we encrypt x + 1 instead of x:
         let c = Paillier::encrypt_with_chosen_randomness(
@@ -306,7 +310,7 @@ mod test {
             ciphertext: c,
             ek,
             Q,
-            G: GE::generator(),
+            G: Point::<Secp256k1>::generator().to_point(),
             h1,
             h2,
             N_tilde: ek_tilde.n,
@@ -314,7 +318,10 @@ mod test {
 
         let pdl_w_slack_witness = PDLwSlackWitness { x, r: randomness.0 };
 
-        let proof = PDLwSlackProof::prove(&pdl_w_slack_witness, &pdl_w_slack_statement);
+        let proof = PDLwSlackProof::<Secp256k1, Sha256>::prove(
+            &pdl_w_slack_witness,
+            &pdl_w_slack_statement,
+        );
         // verify h1,h2, N_tilde
         let setup_result = composite_dlog_proof.verify(&statement);
         assert!(setup_result.is_ok());
