@@ -3,7 +3,7 @@
 //! FS-DKR is a protocol for rotation of threshold ECDSA keys.
 //!
 //! We use standard proactive security assumptions. The protocol will be run
-//! by $n$ parties. We assume honest majority, that is, number of corruptions is $t<n/2$.
+//! by $n$ parties. We assume honest majority, that is, number of corruptions is $t<=n/2$.
 //! The adversary is malicious, and rushing. For communication, the parties have access
 //! to a broadcast channel (can be implemented via a bulletin board). For threshold ECDSA,
 //! we focus on GG20 protocol, currently considered state of the art and most widely deployed

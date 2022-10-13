@@ -39,14 +39,17 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
 }
 
 impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
-    pub fn distribute(local_key: &LocalKey<E>, new_n: u16) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
+    pub fn distribute(
+        local_key: &LocalKey<E>,
+        new_n: u16,
+    ) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
+        assert!(local_key.t <= new_n / 2);
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
         if new_n <= local_key.t {
             return Err(FsDkrError::NewPartyUnassignedIndexError);
         }
-        let (vss_scheme, secret_shares) =
-            VerifiableSS::<E>::share(local_key.t, new_n, &secret);
+        let (vss_scheme, secret_shares) = VerifiableSS::<E>::share(local_key.t, new_n, &secret);
 
         // commit to points on the polynomial
         let points_committed_vec: Vec<_> = (0..secret_shares.len())
@@ -167,7 +170,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         let indices: Vec<u16> = (0..(parameters.threshold + 1) as usize)
             .map(|i| refresh_messages[i].party_index - 1)
             .collect();
-        
+
         println!("indices {:?}", indices);
 
         // optimization - one decryption
@@ -208,14 +211,22 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
             if party_index <= current_len {
-                key.paillier_key_vec.remove((party_index - 1) as usize,);
-                key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
-                key.h1_h2_n_tilde_vec.remove((party_index - 1) as usize,);
-                key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
+                key.paillier_key_vec.remove((party_index - 1) as usize);
+                key.paillier_key_vec
+                    .insert((party_index - 1) as usize, join_message.ek.clone());
+                key.h1_h2_n_tilde_vec.remove((party_index - 1) as usize);
+                key.h1_h2_n_tilde_vec.insert(
+                    (party_index - 1) as usize,
+                    join_message.dlog_statement_base_h1.clone(),
+                );
             } else {
-                key.paillier_key_vec.insert((party_index - 1) as usize, join_message.ek.clone());
-                key.h1_h2_n_tilde_vec.insert((party_index - 1) as usize, join_message.dlog_statement_base_h1.clone());
-            }      
+                key.paillier_key_vec
+                    .insert((party_index - 1) as usize, join_message.ek.clone());
+                key.h1_h2_n_tilde_vec.insert(
+                    (party_index - 1) as usize,
+                    join_message.dlog_statement_base_h1.clone(),
+                );
+            }
         }
 
         RefreshMessage::distribute(key, new_n as u16)

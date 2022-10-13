@@ -30,7 +30,7 @@ mod tests {
     fn test1() {
         //simulate keygen
         let t = 3;
-        let n = 5;
+        let n = 6;
         let mut keys = simulate_keygen(t, n);
 
         let old_keys = keys.clone();
