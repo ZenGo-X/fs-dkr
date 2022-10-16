@@ -258,10 +258,10 @@ mod tests {
     ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
         let mut broadcast_vec: Vec<RefreshMessage<Secp256k1, Sha256>> = Vec::new();
         let mut new_dks: Vec<DecryptionKey> = Vec::new();
-
-        for key in keys.iter() {
+        let keys_len = keys.len();
+        for key in keys.iter_mut() {
             let (refresh_message, new_dk) =
-                RefreshMessage::distribute(key, keys.len() as u16).unwrap();
+                RefreshMessage::distribute(key, keys_len as u16).unwrap();
             broadcast_vec.push(refresh_message);
             new_dks.push(new_dk);
         }

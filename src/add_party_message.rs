@@ -193,6 +193,7 @@ impl JoinMessage {
 
         // check what parties are assigned in the current rotation and associate their paillier
         // ek to each available party index.
+
         let available_parties: HashMap<u16, &EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.ek))
@@ -223,7 +224,6 @@ impl JoinMessage {
         let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
             .map(|party| {
                 let ek = available_parties.get(&party);
-
                 match ek {
                     None => EncryptionKey {
                         n: BigInt::zero(),
@@ -233,6 +233,7 @@ impl JoinMessage {
                 }
             })
             .collect();
+        println!("from join message {:?}", paillier_key_vec[0]);
         // generate the DLogStatement vec needed for the LocalKey generation.
         let h1_h2_ntilde_vec: Vec<DLogStatement> = (1..n + 1)
             .map(|party| {

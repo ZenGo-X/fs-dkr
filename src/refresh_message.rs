@@ -42,7 +42,7 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
 
 impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
     pub fn distribute(
-        local_key: &LocalKey<E>,
+        local_key: &mut LocalKey<E>,
         new_n: u16,
     ) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
         assert!(local_key.t <= new_n / 2);
@@ -52,6 +52,8 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             return Err(FsDkrError::NewPartyUnassignedIndexError);
         }
         let (vss_scheme, secret_shares) = VerifiableSS::<E>::share(local_key.t, new_n, &secret);
+
+        local_key.vss_scheme = vss_scheme.clone();
 
         // commit to points on the polynomial
         let points_committed_vec: Vec<_> = (0..secret_shares.len())
@@ -105,9 +107,9 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             })
             .collect();
 
-        let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
-        let dk_correctness_proof = NiCorrectKeyProof::proof(&dk, None);
-
+        // let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
+        // let dk_correctness_proof = NiCorrectKeyProof::proof(&dk, None);
+        // local_key.paillier_key_vec[(local_key.i - 1) as usize] = ek.clone();
         Ok((
             RefreshMessage {
                 party_index: local_key.i,
@@ -245,6 +247,8 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 );
             }
         }
+
+        println!("from refresh message={:?}", key.paillier_key_vec[0]);
 
         RefreshMessage::distribute(key, new_n as u16)
     }
