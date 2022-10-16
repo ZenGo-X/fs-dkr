@@ -106,10 +106,10 @@ mod tests {
                 keys: &mut [LocalKey<Secp256k1>],
                 join_messages: &[JoinMessage],
             ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
-                let new_n = keys.len() as u16;
+                let new_n = (&keys.len() + join_messages.len()) as u16;
                 keys.iter_mut()
                     .map(|key| {
-                        RefreshMessage::replace(join_messages, &mut key.clone(), new_n).unwrap()
+                        RefreshMessage::replace(join_messages, key, new_n).unwrap()
                     })
                     .unzip()
             }
@@ -127,7 +127,6 @@ mod tests {
             // each existing party has to generate it's refresh message aware of the new parties
             let (refresh_messages, dk_keys) =
                 generate_refresh_parties_replace(keys, join_messages.as_slice());
-
             // all existing parties rotate aware of the join_messages
             for i in 0..keys.len() as usize {
                 RefreshMessage::collect(
@@ -169,7 +168,7 @@ mod tests {
         simulate_replace(&mut keys, &[2, 7], t, n).unwrap();
 
         let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
-        simulate_signing(offline_sign, b"ZenGo");
+        // simulate_signing(offline_sign, b"ZenGo");
     }
 
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey<Secp256k1>> {

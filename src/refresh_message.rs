@@ -190,8 +190,6 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             .map(|i| refresh_messages[i].party_index - 1)
             .collect();
 
-        println!("indices {:?}", indices);
-
         // optimization - one decryption
         let li_vec: Vec<_> = (0..parameters.threshold as usize + 1)
             .map(|i| {
@@ -261,7 +259,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n as u16)?;
 
         for refresh_message in refresh_messages.iter() {
-            for i in 0..(local_key.n as usize) {
+            for i in 0..(new_n as usize) {
                 let statement = PDLwSlackStatement {
                     ciphertext: refresh_message.points_encrypted_vec[i].clone(),
                     ek: local_key.paillier_key_vec[i].clone(),

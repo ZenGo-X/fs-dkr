@@ -204,8 +204,6 @@ impl JoinMessage {
             )
             .collect();
 
-        println!("available parties {:?}", available_parties.len());
-
         // TODO: submit the statement the dlog proof as well!
         // check what parties are assigned in the current rotation and associate their DLogStatements
         // and check their CompositeDlogProofs.
