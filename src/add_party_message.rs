@@ -233,7 +233,6 @@ impl JoinMessage {
                 }
             })
             .collect();
-        println!("from join message {:?}", paillier_key_vec[0]);
         // generate the DLogStatement vec needed for the LocalKey generation.
         let h1_h2_ntilde_vec: Vec<DLogStatement> = (1..n + 1)
             .map(|party| {
@@ -257,6 +256,8 @@ impl JoinMessage {
         // generate the vss_scheme for the LocalKey
         let (vss_scheme, _) = VerifiableSS::<E>::share(t, n, &new_share_fe);
         // TODO: secret cleanup might be needed.
+
+        println!("from join message {:?}", paillier_key_vec[0]);
 
         let local_key = LocalKey {
             paillier_dk,

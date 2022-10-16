@@ -107,9 +107,9 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             })
             .collect();
 
-        // let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
-        // let dk_correctness_proof = NiCorrectKeyProof::proof(&dk, None);
-        // local_key.paillier_key_vec[(local_key.i - 1) as usize] = ek.clone();
+        let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
+        let dk_correctness_proof = NiCorrectKeyProof::proof(&dk, None);
+
         Ok((
             RefreshMessage {
                 party_index: local_key.i,
@@ -349,6 +349,8 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             // if the proof checks, we add the new paillier public key to the key
             local_key.paillier_key_vec[(party_index - 1) as usize] = join_message.ek.clone();
         }
+
+        println!("from refresh {:?}", local_key.paillier_key_vec[0]);
 
         let new_share = Paillier::decrypt(&local_key.paillier_dk, cipher_text_sum)
             .0
