@@ -248,8 +248,6 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             }
         }
 
-        println!("from refresh message={:?}", key.paillier_key_vec[0]);
-
         RefreshMessage::distribute(key, new_n as u16)
     }
 
@@ -350,8 +348,6 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             local_key.paillier_key_vec[(party_index - 1) as usize] = join_message.ek.clone();
         }
 
-        println!("from refresh {:?}", local_key.paillier_key_vec[0]);
-
         let new_share = Paillier::decrypt(&local_key.paillier_dk, cipher_text_sum)
             .0
             .into_owned();
@@ -368,7 +364,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         local_key.keys_linear.y = Point::<E>::generator() * new_share_fe;
 
         // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
-        for i in 0..refresh_messages.len() as usize {
+        for i in 0..refresh_messages.len() + join_messages.len() as usize {
             local_key.pk_vec[i] =
                 refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone();
             for j in 1..local_key.t as usize + 1 {

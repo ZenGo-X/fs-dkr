@@ -257,8 +257,6 @@ impl JoinMessage {
         let (vss_scheme, _) = VerifiableSS::<E>::share(t, n, &new_share_fe);
         // TODO: secret cleanup might be needed.
 
-        println!("from join message {:?}", paillier_key_vec[0]);
-
         let local_key = LocalKey {
             paillier_dk,
             pk_vec,

@@ -168,7 +168,7 @@ mod tests {
         simulate_replace(&mut keys, &[2, 7], t, n).unwrap();
 
         let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
-        // simulate_signing(offline_sign, b"ZenGo");
+        simulate_signing(offline_sign, b"ZenGo");
     }
 
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey<Secp256k1>> {
