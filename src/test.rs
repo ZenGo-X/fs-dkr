@@ -106,8 +106,9 @@ mod tests {
                 keys: &mut [LocalKey<Secp256k1>],
                 join_messages: &[JoinMessage],
             ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
+                let new_n = (&keys.len() + join_messages.len()) as u16;
                 keys.iter_mut()
-                    .map(|key| RefreshMessage::replace(join_messages, key).unwrap())
+                    .map(|key| RefreshMessage::replace(join_messages, key, new_n).unwrap())
                     .unzip()
             }
 
@@ -124,7 +125,6 @@ mod tests {
             // each existing party has to generate it's refresh message aware of the new parties
             let (refresh_messages, dk_keys) =
                 generate_refresh_parties_replace(keys, join_messages.as_slice());
-
             // all existing parties rotate aware of the join_messages
             for i in 0..keys.len() as usize {
                 RefreshMessage::collect(
@@ -181,15 +181,16 @@ mod tests {
         simulation.run().unwrap()
     }
 
-    fn simulate_dkr_removal(keys: &mut Vec<LocalKey<Secp256k1>>, remove_party_indices: Vec<usize>) {
+    fn simulate_dkr_removal(keys: &mut Vec<LocalKey<Secp256k1>>, remove_party_indices: Vec<u16>) {
         let mut broadcast_messages: HashMap<usize, Vec<RefreshMessage<Secp256k1, Sha256>>> =
             HashMap::new();
         let mut new_dks: HashMap<usize, DecryptionKey> = HashMap::new();
         let mut refresh_messages: Vec<RefreshMessage<Secp256k1, Sha256>> = Vec::new();
         let mut party_key: HashMap<usize, LocalKey<Secp256k1>> = HashMap::new();
-
+        // TODO: Verify this is correct
+        let new_n = keys.len() as u16;
         for key in keys.iter_mut() {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(key);
+            let (refresh_message, new_dk) = RefreshMessage::distribute(key, new_n).unwrap();
             refresh_messages.push(refresh_message.clone());
             new_dks.insert(refresh_message.party_index.into(), new_dk);
             party_key.insert(refresh_message.party_index.into(), key.clone());
@@ -210,7 +211,10 @@ mod tests {
             }
 
             for (party_index, refresh_bucket) in broadcast_messages.iter_mut() {
-                if refresh_message.remove_party_indices.contains(party_index) {
+                if refresh_message
+                    .remove_party_indices
+                    .contains(&(*party_index as u16))
+                {
                     continue;
                 }
                 refresh_bucket.push(refresh_message.clone());
@@ -218,12 +222,12 @@ mod tests {
         }
 
         for remove_party_index in remove_party_indices.iter() {
-            assert_eq!(broadcast_messages[remove_party_index].len(), 1);
+            assert_eq!(broadcast_messages[&(*remove_party_index as usize)].len(), 1);
         }
 
         // keys will be updated to refreshed values
         for (party, key) in party_key.iter_mut() {
-            if remove_party_indices.contains(party) {
+            if remove_party_indices.contains(&(*party as u16)) {
                 continue;
             }
 
@@ -238,9 +242,9 @@ mod tests {
 
         for remove_party_index in remove_party_indices {
             let result = RefreshMessage::collect(
-                &broadcast_messages[&remove_party_index],
-                &mut keys[remove_party_index],
-                new_dks[&remove_party_index].clone(),
+                &broadcast_messages[&(remove_party_index as usize)],
+                &mut keys[remove_party_index as usize],
+                new_dks[&(remove_party_index as usize)].clone(),
                 &[],
             );
             assert!(result.is_err());
@@ -252,9 +256,10 @@ mod tests {
     ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
         let mut broadcast_vec: Vec<RefreshMessage<Secp256k1, Sha256>> = Vec::new();
         let mut new_dks: Vec<DecryptionKey> = Vec::new();
-
-        for key in keys.iter() {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(key);
+        let keys_len = keys.len();
+        for key in keys.iter_mut() {
+            let (refresh_message, new_dk) =
+                RefreshMessage::distribute(key, keys_len as u16).unwrap();
             broadcast_vec.push(refresh_message);
             new_dks.push(new_dk);
         }

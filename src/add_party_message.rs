@@ -13,7 +13,7 @@
 use crate::error::{FsDkrError, FsDkrResult};
 use crate::refresh_message::RefreshMessage;
 use curv::arithmetic::{BasicOps, Modulo, One, Samplable, Zero};
-use curv::cryptographic_primitives::hashing::Digest;
+use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
@@ -44,7 +44,7 @@ pub struct JoinMessage {
 /// environment variables for each party that they agree on. In this case, each new party generates
 /// it's own DlogStatements and submits it's proofs
 fn generate_h1_h2_n_tilde() -> (BigInt, BigInt, BigInt, BigInt, BigInt) {
-    let (ek_tilde, dk_tilde) = Paillier::keypair().keys();
+    let (ek_tilde, dk_tilde) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
     let one = BigInt::one();
     let phi = (&dk_tilde.p - &one) * (&dk_tilde.q - &one);
     let h1 = BigInt::sample_below(&ek_tilde.n);
@@ -193,6 +193,7 @@ impl JoinMessage {
 
         // check what parties are assigned in the current rotation and associate their paillier
         // ek to each available party index.
+
         let available_parties: HashMap<u16, &EncryptionKey> = refresh_messages
             .iter()
             .map(|msg| (msg.party_index, &msg.ek))
@@ -203,8 +204,6 @@ impl JoinMessage {
                     .map(|join_message| (join_message.party_index.unwrap(), &join_message.ek)),
             )
             .collect();
-
-        println!("available parties {:?}", available_parties.len());
 
         // TODO: submit the statement the dlog proof as well!
         // check what parties are assigned in the current rotation and associate their DLogStatements
@@ -225,7 +224,6 @@ impl JoinMessage {
         let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
             .map(|party| {
                 let ek = available_parties.get(&party);
-
                 match ek {
                     None => EncryptionKey {
                         n: BigInt::zero(),
