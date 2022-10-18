@@ -11,13 +11,60 @@ The FS-DKG protocol is a one round DKG based on Publicly Verifiable Secret Shari
 1. It introduces a factoring assumptions (DCRA)
 2. it is insecure against rushing adversary
 
-Rushing adversary is a common assumption in Multiparty Computation (MPC). In FS-DKG, an adversary waiting to receive messages from all other parties will be able to decide on the final public key. In the worst case it can lead to a rouge-key attack, giving full control of the secret key to the attacker. This is the main reason, in our opinion, why  FS-DKG, altough with prominent features, was over-looked for the past 20 years.
+Rushing adversary is a common assumption in Multiparty Computation (MPC). In FS-DKG, an adversary waiting to receive messages from all other parties will be able to decide on the final public key. In the worst case it can lead to a rogue-key attack, giving full control of the secret key to the attacker. This is the main reason, in our opinion, why  FS-DKG, altough with prominent features, was over-looked for the past 20 years.
 in this write-up we show how by adjusting FS-DKG to key rotation for threshold ecdsa the above shortcomings are avoided.
 
 ## Our Model
-We use standard proactive security assumptions. The protocol will be run by $n$ parties. We assume honest majority, that is, number of corruptions is $t<n/2$. The adversary is malicious, and rushing. 
+We use standard proactive security assumptions. The protocol will be run by $n$ parties. We assume honest majority, that is, number of corruptions is $t<=n/2$. The adversary is malicious, and rushing.
 For communication, the parties have access to a broadcast channel (can be implemented via a bulletin board).
 For threshold ECDSA, we focus on [GG20](https://eprint.iacr.org/2020/540.pdf) protocol, currently considered state of the art and most widely deployed threshold ecdsa scheme (e.g. [multi-party-ecdsa](https://github.com/ZenGo-X/multi-party-ecdsa), [tss-lib](https://github.com/binance-chain/tss-lib)). 
+
+## How To Use
+### Refresh a Key
+Each party calls `RefreshMessage::distribute(key)` on their `LocalKey` and broadcasts the `RefreshMessage` while saving their new `DecryptionKey`. <br>
+After recieving all the refresh messages each party calls `RefreshMessage::collect(..)` with a vector of all the refresh messages, a mutable reference to their own key, and their new `DecryptionKey`, This will validate all the refresh messages, and if all the proofs are correct it will update the local key to contain the new decryption keys of all the parties.
+
+Example:
+```rust
+// All parties should run this
+let mut party_i_key: LocalKey<_>;
+let (party_i_refresh_message, party_i_new_decryption_key) = RefreshMessage::distribute(party_i_key);
+broadcast(party_i_refresh_message);
+let vec_refresh_messages = recv_from_broadcast();
+RefreshMessage::collect(&vec_refresh_messages, &mut party_i_key, party_i_new_decryption_key, &[])?;
+```
+
+### Replacing a party
+Each party that wants to join first generates a `JoinMessage` via `JoinMessage::distribute()` and broadcasts it to the current parties. <br>
+The existing parties choose the index(who are they replacing) for the joining party.
+Note that this part is delicate and needs to happen outside of the library because it requires some kind of mutual agreement, and you cannot trust the new party to communicate which party are they replacing. <br>
+After agreeing on the index each party modifies the join message to contain the index `join_message.party_index = Some(index)`. <br>
+Each existing party calls `RefreshMessage::replace(join_message, local_key)` with the join message and its own local key, this returns a refresh message and a new decryption key, just like in a Key Refresh, and they all broadcast the `RefreshMessage`. <br>
+Each existing party recieves all the broadcasted refresh messages and calls `RefreshMessage::collect(..)` with a vector of all the refresh messages, a mutable reference to their own key, the new `DecryptionKey`, and a slice of all the join messages(`JoinMessage`) <br>
+This will validate both the refresh messages and the join messages and if all the proofs are correct it will update the local key both as a refresh(new decryption keys) and replace the existing parties with the new ones. <br>
+The new party calls `join_message.collect(..)` with the broadcasted `RefreshMessage` of the existing parties and all the join messages which returns a new `LocalKey` for the new party.
+
+Example:
+```rust
+// PoV of the new party
+let (join_message, new_party_decryption_key) = JoinMessage::distribute();
+broadcast(join_message);
+let new_party_index = recv_broadcast();
+let vec_refresh_messages = recv_from_broadcast();
+let new_party_local_key = join_message.collect(&vec_refresh_messages, new_party_decryption_key, &[])?;
+
+// PoV of the other parties
+let mut party_i_key: LocalKey<_>;
+let mut join_message = recv_broadcast();
+let new_index = decide_who_to_replace(&join_message);
+broadcast(new_index);
+assert!(recv_from_broadcast().iter().all(|index| index == new_index));
+join_message.party_index = Some(new_index);
+let (party_i_refresh_message, party_i_new_decryption_key) = RefreshMessage::replace(join_message, party_i_key)?;
+broadcast(party_i_refresh_message);
+let vec_refresh_messages = recv_from_broadcast();
+RefreshMessage::collect(&vec_refresh_messages, &mut party_i_key, party_i_new_decryption_key, &[join_message])?;
+```
 
 ## High-level Description of FS-DKG
 Here we give a short description of the FS-DKG protocol.
@@ -53,5 +100,4 @@ The third relevant work is Jens Groth' [Non interactive DKG and DKR](https://epr
 
 ## Acknowledgments
 We thank Claudio Orlandi, Kobi Gurkan and Nikolaos Makriyannis for reviewing the note
-
 

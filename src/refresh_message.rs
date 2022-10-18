@@ -1,12 +1,15 @@
 use crate::add_party_message::JoinMessage;
 use crate::error::{FsDkrError, FsDkrResult};
-use crate::proof_of_fairness::{FairnessProof, FairnessStatement, FairnessWitness};
-use curv::arithmetic::{Samplable, Zero};
+use crate::range_proofs::AliceProof;
+use crate::zk_pdl_with_slack::{PDLwSlackProof, PDLwSlackStatement, PDLwSlackWitness};
+use curv::arithmetic::{BitManipulation, Samplable, Zero};
+use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
-use curv::elliptic::curves::traits::{ECPoint, ECScalar};
+use curv::elliptic::curves::{Curve, Point, Scalar};
 use curv::BigInt;
+use curv::HashChoice;
 use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::keygen::LocalKey;
 pub use paillier::DecryptionKey;
 use paillier::{
@@ -17,46 +20,53 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
 use zeroize::Zeroize;
-use zk_paillier::zkproofs::{DLogStatement, NICorrectKeyProof, SALT_STRING};
+use zk_paillier::zkproofs::{DLogStatement, NiCorrectKeyProof, SALT_STRING};
 
 // Everything here can be broadcasted
-#[derive(Clone, Deserialize, Serialize)]
-pub struct RefreshMessage<P> {
-    pub(crate) party_index: usize,
-    fairness_proof_vec: Vec<FairnessProof<P>>,
-    coefficients_committed_vec: VerifiableSS<P>,
-    pub(crate) points_committed_vec: Vec<P>,
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
+    pub(crate) party_index: u16,
+    pdl_proof_vec: Vec<PDLwSlackProof<E, H>>,
+    range_proofs: Vec<AliceProof<E, H>>,
+    coefficients_committed_vec: VerifiableSS<E>,
+    pub(crate) points_committed_vec: Vec<Point<E>>,
     points_encrypted_vec: Vec<BigInt>,
-    dk_correctness_proof: NICorrectKeyProof,
+    dk_correctness_proof: NiCorrectKeyProof,
     pub(crate) dlog_statement: DLogStatement,
     pub(crate) ek: EncryptionKey,
-    pub(crate) remove_party_indices: Vec<usize>,
-    pub(crate) public_key: P,
+    pub(crate) remove_party_indices: Vec<u16>,
+    pub(crate) public_key: Point<E>,
+    #[serde(skip)]
+    pub hash_choice: HashChoice<H>,
 }
 
-impl<P> RefreshMessage<P> {
-    pub fn distribute(local_key: &LocalKey<P>) -> (Self, DecryptionKey)
-    where
-        P: ECPoint + Clone + Zeroize,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
-    {
+impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
+    pub fn distribute(
+        local_key: &mut LocalKey<E>,
+        new_n: u16,
+    ) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
+        assert!(local_key.t <= new_n / 2);
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
-        let (vss_scheme, secret_shares) =
-            VerifiableSS::<P>::share(local_key.t as usize, local_key.n as usize, &secret);
+        if new_n <= local_key.t {
+            return Err(FsDkrError::NewPartyUnassignedIndexError);
+        }
+        let (vss_scheme, secret_shares) = VerifiableSS::<E>::share(local_key.t, new_n, &secret);
+
+        local_key.vss_scheme = vss_scheme.clone();
 
         // commit to points on the polynomial
         let points_committed_vec: Vec<_> = (0..secret_shares.len())
-            .map(|i| P::generator() * secret_shares[i].clone())
+            .map(|i| Point::<E>::generator() * &secret_shares[i].clone().into())
             .collect();
 
-        //encrypt points on the polynomial using Paillier keys
+        // encrypt points on the polynomial using Paillier keys
         let (points_encrypted_vec, randomness_vec): (Vec<_>, Vec<_>) = (0..secret_shares.len())
             .map(|i| {
                 let randomness = BigInt::sample_below(&local_key.paillier_key_vec[i].n);
                 let ciphertext = Paillier::encrypt_with_chosen_randomness(
                     &local_key.paillier_key_vec[i],
-                    RawPlaintext::from(secret_shares[i].to_big_int()),
+                    RawPlaintext::from(secret_shares[i].to_bigint()),
                     &Randomness::from(randomness.clone()),
                 )
                 .0
@@ -65,29 +75,46 @@ impl<P> RefreshMessage<P> {
             })
             .unzip();
 
-        // generate proof of fairness for each {point_committed, point_encrypted} pair
-        let fairness_proof_vec: Vec<_> = (0..secret_shares.len())
+        // generate PDL proofs for each {point_committed, point_encrypted} pair
+        let pdl_proof_vec: Vec<_> = (0..secret_shares.len())
             .map(|i| {
-                let witness = FairnessWitness {
+                let witness = PDLwSlackWitness {
                     x: secret_shares[i].clone(),
                     r: randomness_vec[i].clone(),
                 };
-                let statement = FairnessStatement {
+                let statement = PDLwSlackStatement {
+                    ciphertext: points_encrypted_vec[i].clone(),
                     ek: local_key.paillier_key_vec[i].clone(),
-                    c: points_encrypted_vec[i].clone(),
-                    Y: points_committed_vec[i].clone(),
+                    Q: points_committed_vec[i].clone(),
+                    G: Point::<E>::generator().to_point(),
+                    h1: local_key.h1_h2_n_tilde_vec[i].g.clone(),
+                    h2: local_key.h1_h2_n_tilde_vec[i].ni.clone(),
+                    N_tilde: local_key.h1_h2_n_tilde_vec[i].N.clone(),
                 };
-                FairnessProof::prove(&witness, &statement)
+                PDLwSlackProof::prove(&witness, &statement)
             })
             .collect();
 
-        let (ek, dk) = Paillier::keypair().keys();
-        let dk_correctness_proof = NICorrectKeyProof::proof(&dk, None);
+        let range_proofs = (0..secret_shares.len())
+            .map(|i| {
+                AliceProof::generate(
+                    &secret_shares[i].to_bigint(),
+                    &points_encrypted_vec[i],
+                    &local_key.paillier_key_vec[i],
+                    &local_key.h1_h2_n_tilde_vec[i],
+                    &randomness_vec[i],
+                )
+            })
+            .collect();
 
-        (
+        let (ek, dk) = Paillier::keypair_with_modulus_size(crate::PAILLIER_KEY_SIZE).keys();
+        let dk_correctness_proof = NiCorrectKeyProof::proof(&dk, None);
+
+        Ok((
             RefreshMessage {
-                party_index: local_key.i as usize,
-                fairness_proof_vec,
+                party_index: local_key.i,
+                pdl_proof_vec,
+                range_proofs,
                 coefficients_committed_vec: vss_scheme,
                 points_committed_vec,
                 points_encrypted_vec,
@@ -96,39 +123,36 @@ impl<P> RefreshMessage<P> {
                 ek,
                 remove_party_indices: Vec::new(),
                 public_key: local_key.y_sum_s.clone(),
+                hash_choice: HashChoice::new(),
             },
             dk,
-        )
+        ))
     }
 
-    pub fn validate_collect(refresh_messages: &[Self], t: usize, n: usize) -> FsDkrResult<()>
-    where
-        P: ECPoint + Clone + Zeroize + Debug,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
-    {
+    pub fn validate_collect(refresh_messages: &[Self], t: u16, n: u16) -> FsDkrResult<()> {
         // check we got at least threshold t refresh messages
-        if refresh_messages.len() <= t {
+        if refresh_messages.len() <= t.into() {
             return Err(FsDkrError::PartiesThresholdViolation {
-                threshold: t as u16,
+                threshold: t,
                 refreshed_keys: refresh_messages.len(),
             });
         }
 
         // check all vectors are of same length
-        let reference_len = refresh_messages[0].fairness_proof_vec.len();
+        let reference_len = refresh_messages[0].pdl_proof_vec.len();
 
         for (k, refresh_message) in refresh_messages.iter().enumerate() {
-            let fairness_proof_len = refresh_message.fairness_proof_vec.len();
+            let pdl_proof_len = refresh_message.pdl_proof_vec.len();
             let points_commited_len = refresh_message.points_committed_vec.len();
             let points_encrypted_len = refresh_message.points_encrypted_vec.len();
 
-            if !(fairness_proof_len == reference_len
+            if !(pdl_proof_len == reference_len
                 && points_commited_len == reference_len
                 && points_encrypted_len == reference_len)
             {
                 return Err(FsDkrError::SizeMismatchError {
                     refresh_message_index: k,
-                    fairness_proof_len,
+                    pdl_proof_len,
                     points_commited_len,
                     points_encrypted_len,
                 });
@@ -136,11 +160,11 @@ impl<P> RefreshMessage<P> {
         }
 
         for refresh_message in refresh_messages.iter() {
-            for i in 0..n {
+            for i in 0..n as usize {
                 //TODO: we should handle the case of t<i<n
                 if refresh_message
                     .coefficients_committed_vec
-                    .validate_share_public(&refresh_message.points_committed_vec[i], i + 1)
+                    .validate_share_public(&refresh_message.points_committed_vec[i], i as u16 + 1)
                     .is_err()
                 {
                     return Err(FsDkrError::PublicShareValidationError);
@@ -153,14 +177,10 @@ impl<P> RefreshMessage<P> {
 
     pub(crate) fn get_ciphertext_sum<'a>(
         refresh_messages: &'a [Self],
-        party_index: usize,
+        party_index: u16,
         parameters: &'a ShamirSecretSharing,
         ek: &'a EncryptionKey,
-    ) -> (RawCiphertext<'a>, Vec<P::Scalar>)
-    where
-        P: ECPoint + Clone + Zeroize + Debug,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
-    {
+    ) -> (RawCiphertext<'a>, Vec<Scalar<E>>) {
         // TODO: check we have large enough qualified set , at least t+1
         //decrypt the new share
         // we first homomorphically add all ciphertext encrypted using our encryption key
@@ -168,14 +188,14 @@ impl<P> RefreshMessage<P> {
             .map(|k| refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize].clone())
             .collect();
 
-        let indices: Vec<_> = (0..(parameters.threshold + 1) as usize)
+        let indices: Vec<u16> = (0..(parameters.threshold + 1) as usize)
             .map(|i| refresh_messages[i].party_index - 1)
             .collect();
 
         // optimization - one decryption
         let li_vec: Vec<_> = (0..parameters.threshold as usize + 1)
             .map(|i| {
-                VerifiableSS::<P>::map_share_to_new_params(
+                VerifiableSS::<E>::map_share_to_new_params(
                     parameters.clone().borrow(),
                     indices[i],
                     &indices,
@@ -188,7 +208,7 @@ impl<P> RefreshMessage<P> {
                 Paillier::mul(
                     ek,
                     RawCiphertext::from(ciphertext_vec[i].clone()),
-                    RawPlaintext::from(li_vec[i].to_big_int()),
+                    RawPlaintext::from(li_vec[i].to_bigint()),
                 )
             })
             .collect();
@@ -203,53 +223,69 @@ impl<P> RefreshMessage<P> {
 
     pub fn replace(
         new_parties: &[JoinMessage],
-        key: &mut LocalKey<P>,
-    ) -> FsDkrResult<(Self, DecryptionKey)>
-    where
-        P: ECPoint + Clone + Zeroize + Debug,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
-    {
+        key: &mut LocalKey<E>,
+        new_n: u16,
+    ) -> FsDkrResult<(Self, DecryptionKey)> {
+        let current_len = key.paillier_key_vec.len() as u16;
         for join_message in new_parties.iter() {
             let party_index = join_message.get_party_index()?;
-            key.paillier_key_vec[party_index - 1] = join_message.ek.clone();
-            key.h1_h2_n_tilde_vec[party_index - 1] = join_message.dlog_statement.clone();
+            if party_index <= current_len {
+                key.paillier_key_vec.remove((party_index - 1) as usize);
+                key.paillier_key_vec
+                    .insert((party_index - 1) as usize, join_message.ek.clone());
+                key.h1_h2_n_tilde_vec.remove((party_index - 1) as usize);
+                key.h1_h2_n_tilde_vec.insert(
+                    (party_index - 1) as usize,
+                    join_message.dlog_statement.clone(),
+                );
+            } else {
+                key.paillier_key_vec
+                    .insert((party_index - 1) as usize, join_message.ek.clone());
+                key.h1_h2_n_tilde_vec.insert(
+                    (party_index - 1) as usize,
+                    join_message.dlog_statement.clone(),
+                );
+            }
         }
 
-        Ok(RefreshMessage::distribute(key))
+        RefreshMessage::distribute(key, new_n as u16)
     }
 
     pub fn collect(
         refresh_messages: &[Self],
-        mut local_key: &mut LocalKey<P>,
+        mut local_key: &mut LocalKey<E>,
         new_dk: DecryptionKey,
         join_messages: &[JoinMessage],
-    ) -> FsDkrResult<()>
-    where
-        P: ECPoint + Clone + Zeroize + Debug,
-        P::Scalar: PartialEq + Clone + Debug + Zeroize,
-    {
-        RefreshMessage::validate_collect(
-            refresh_messages,
-            local_key.t as usize,
-            local_key.n as usize,
-        )?;
+    ) -> FsDkrResult<()> {
+        let new_n = refresh_messages.len() + join_messages.len();
+        RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n as u16)?;
 
-        let mut statement: FairnessStatement<P>;
         for refresh_message in refresh_messages.iter() {
-            for i in 0..(local_key.n as usize) {
-                statement = FairnessStatement {
+            for i in 0..(new_n as usize) {
+                let statement = PDLwSlackStatement {
+                    ciphertext: refresh_message.points_encrypted_vec[i].clone(),
                     ek: local_key.paillier_key_vec[i].clone(),
-                    c: refresh_message.points_encrypted_vec[i].clone(),
-                    Y: refresh_message.points_committed_vec[i].clone(),
+                    Q: refresh_message.points_committed_vec[i].clone(),
+                    G: Point::<E>::generator().to_point(),
+                    h1: local_key.h1_h2_n_tilde_vec[i].g.clone(),
+                    h2: local_key.h1_h2_n_tilde_vec[i].ni.clone(),
+                    N_tilde: local_key.h1_h2_n_tilde_vec[i].N.clone(),
                 };
-                refresh_message.fairness_proof_vec[i].verify(&statement)?;
+                refresh_message.pdl_proof_vec[i].verify(&statement)?;
+                if !refresh_message.range_proofs[i].verify(
+                    &statement.ciphertext,
+                    &statement.ek,
+                    &local_key.h1_h2_n_tilde_vec[i],
+                ) {
+                    return Err(FsDkrError::RangeProof { party_index: i });
+                }
             }
         }
 
         let old_ek = local_key.paillier_key_vec[(local_key.i - 1) as usize].clone();
         let (cipher_text_sum, li_vec) = RefreshMessage::get_ciphertext_sum(
             refresh_messages,
-            local_key.i as usize,
+            local_key.i,
             &local_key.vss_scheme.parameters,
             &old_ek,
         );
@@ -264,9 +300,16 @@ impl<P> RefreshMessage<P> {
                     party_index: refresh_message.party_index,
                 });
             }
+            let n_length = refresh_message.ek.n.bit_length();
+            if n_length > crate::PAILLIER_KEY_SIZE || n_length < crate::PAILLIER_KEY_SIZE - 1 {
+                return Err(FsDkrError::MouliTooSmall {
+                    party_index: refresh_message.party_index,
+                    moduli_size: n_length,
+                });
+            }
 
             // if the proof checks, we add the new paillier public key to the key
-            local_key.paillier_key_vec[refresh_message.party_index - 1] =
+            local_key.paillier_key_vec[(refresh_message.party_index - 1) as usize] =
                 refresh_message.ek.clone();
         }
 
@@ -299,15 +342,23 @@ impl<P> RefreshMessage<P> {
                 return Err(FsDkrError::DLogProofValidation { party_index });
             }
 
+            let n_length = join_message.ek.n.bit_length();
+            if n_length > crate::PAILLIER_KEY_SIZE || n_length < crate::PAILLIER_KEY_SIZE - 1 {
+                return Err(FsDkrError::MouliTooSmall {
+                    party_index: join_message.get_party_index()?,
+                    moduli_size: n_length,
+                });
+            }
+
             // if the proof checks, we add the new paillier public key to the key
-            local_key.paillier_key_vec[party_index - 1] = join_message.ek.clone();
+            local_key.paillier_key_vec[(party_index - 1) as usize] = join_message.ek.clone();
         }
 
         let new_share = Paillier::decrypt(&local_key.paillier_dk, cipher_text_sum)
             .0
             .into_owned();
 
-        let new_share_fe: P::Scalar = ECScalar::from(&new_share);
+        let new_share_fe: Scalar<E> = Scalar::<E>::from(&new_share);
 
         // zeroize the old dk key
         local_key.paillier_dk.q.zeroize();
@@ -315,13 +366,11 @@ impl<P> RefreshMessage<P> {
         local_key.paillier_dk = new_dk;
 
         // update old key and output new key
-        local_key.keys_linear.x_i.zeroize();
-
         local_key.keys_linear.x_i = new_share_fe.clone();
-        local_key.keys_linear.y = P::generator() * new_share_fe;
+        local_key.keys_linear.y = Point::<E>::generator() * new_share_fe;
 
         // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
-        for i in 0..local_key.n as usize {
+        for i in 0..refresh_messages.len() + join_messages.len() as usize {
             local_key.pk_vec[i] =
                 refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone();
             for j in 1..local_key.t as usize + 1 {
