@@ -236,14 +236,14 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 key.h1_h2_n_tilde_vec.remove((party_index - 1) as usize);
                 key.h1_h2_n_tilde_vec.insert(
                     (party_index - 1) as usize,
-                    join_message.dlog_statement_base_h1.clone(),
+                    join_message.dlog_statement.clone(),
                 );
             } else {
                 key.paillier_key_vec
                     .insert((party_index - 1) as usize, join_message.ek.clone());
                 key.h1_h2_n_tilde_vec.insert(
                     (party_index - 1) as usize,
-                    join_message.dlog_statement_base_h1.clone(),
+                    join_message.dlog_statement.clone(),
                 );
             }
         }
@@ -324,13 +324,19 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 return Err(FsDkrError::PaillierVerificationError { party_index });
             }
 
+            // creating an inverse dlog statement
+            let dlog_statement_base_h2 = DLogStatement {
+                N: join_message.dlog_statement.N.clone(),
+                g: join_message.dlog_statement.ni.clone(),
+                ni: join_message.dlog_statement.g.clone(),
+            };
             if join_message
                 .composite_dlog_proof_base_h1
-                .verify(&join_message.dlog_statement_base_h1)
+                .verify(&join_message.dlog_statement)
                 .is_err()
                 || join_message
                     .composite_dlog_proof_base_h2
-                    .verify(&join_message.dlog_statement_base_h2)
+                    .verify(&dlog_statement_base_h2)
                     .is_err()
             {
                 return Err(FsDkrError::DLogProofValidation { party_index });
