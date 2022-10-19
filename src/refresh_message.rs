@@ -371,8 +371,10 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
 
         // update local key list of local public keys (X_i = g^x_i is updated by adding all committed points to that party)
         for i in 0..refresh_messages.len() + join_messages.len() as usize {
-            local_key.pk_vec[i] =
-                refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone();
+            local_key.pk_vec.insert(
+                i,
+                refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone(),
+            );
             for j in 1..local_key.t as usize + 1 {
                 local_key.pk_vec[i] = local_key.pk_vec[i].clone()
                     + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
