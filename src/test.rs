@@ -86,10 +86,11 @@ mod tests {
     }
 
     #[test]
-    fn test_add_party() {
+    fn test_add_party_with_permute() {
         fn simulate_replace(
             keys: &mut Vec<LocalKey<Secp256k1>>,
             party_indices: &[u16],
+            new_to_old_map: &HashMap<u16, u16>,
             t: u16,
             n: u16,
         ) -> FsDkrResult<()> {
@@ -104,11 +105,14 @@ mod tests {
 
             fn generate_refresh_parties_replace(
                 keys: &mut [LocalKey<Secp256k1>],
+                new_to_old_map: &HashMap<u16, u16>,
                 join_messages: &[JoinMessage],
             ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
                 let new_n = (&keys.len() + join_messages.len()) as u16;
                 keys.iter_mut()
-                    .map(|key| RefreshMessage::replace(join_messages, key, new_n).unwrap())
+                    .map(|key| {
+                        RefreshMessage::replace(join_messages, key, new_to_old_map, new_n).unwrap()
+                    })
                     .unzip()
             }
 
@@ -124,7 +128,7 @@ mod tests {
 
             // each existing party has to generate it's refresh message aware of the new parties
             let (refresh_messages, dk_keys) =
-                generate_refresh_parties_replace(keys, join_messages.as_slice());
+                generate_refresh_parties_replace(keys, &new_to_old_map, join_messages.as_slice());
             // all existing parties rotate aware of the join_messages
             for i in 0..keys.len() as usize {
                 RefreshMessage::collect(
@@ -162,8 +166,15 @@ mod tests {
         keys.remove(6);
         keys.remove(1);
 
+        let mut new_to_old_map: HashMap<u16, u16> = HashMap::new();
+        new_to_old_map.insert(1, 3);
+        new_to_old_map.insert(3, 4);
+        new_to_old_map.insert(4, 1);
+        new_to_old_map.insert(5, 6);
+        new_to_old_map.insert(6, 5);
+
         // Simulate the replace
-        simulate_replace(&mut keys, &[2, 7], t, n).unwrap();
+        simulate_replace(&mut keys, &[2, 7], &new_to_old_map, t, n).unwrap();
 
         let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
