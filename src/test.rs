@@ -90,7 +90,7 @@ mod tests {
         fn simulate_replace(
             keys: &mut Vec<LocalKey<Secp256k1>>,
             party_indices: &[u16],
-            new_to_old_map: &HashMap<u16, u16>,
+            old_to_new_map: &HashMap<u16, u16>,
             t: u16,
             n: u16,
         ) -> FsDkrResult<()> {
@@ -105,13 +105,13 @@ mod tests {
 
             fn generate_refresh_parties_replace(
                 keys: &mut [LocalKey<Secp256k1>],
-                new_to_old_map: &HashMap<u16, u16>,
+                old_to_new_map: &HashMap<u16, u16>,
                 join_messages: &[JoinMessage],
             ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
                 let new_n = (&keys.len() + join_messages.len()) as u16;
                 keys.iter_mut()
                     .map(|key| {
-                        RefreshMessage::replace(join_messages, key, new_to_old_map, new_n).unwrap()
+                        RefreshMessage::replace(join_messages, key, old_to_new_map, new_n).unwrap()
                     })
                     .unzip()
             }
@@ -128,7 +128,9 @@ mod tests {
 
             // each existing party has to generate it's refresh message aware of the new parties
             let (refresh_messages, dk_keys) =
-                generate_refresh_parties_replace(keys, &new_to_old_map, join_messages.as_slice());
+                generate_refresh_parties_replace(keys, &old_to_new_map, join_messages.as_slice());
+            let mut new_keys_vec: Vec<(u16, LocalKey<Secp256k1>)> =
+                Vec::with_capacity(keys.len() + join_messages.len());
             // all existing parties rotate aware of the join_messages
             for i in 0..keys.len() as usize {
                 RefreshMessage::collect(
@@ -138,6 +140,7 @@ mod tests {
                     join_messages.as_slice(),
                 )
                 .expect("");
+                new_keys_vec.push((keys[i].i - 1, keys[i].clone()));
             }
 
             // all new parties generate a local key
@@ -151,9 +154,15 @@ mod tests {
                     n,
                 )?;
 
-                keys.insert((party_index - 1) as usize, local_key);
+                new_keys_vec.push((party_index - 1, local_key));
             }
 
+            new_keys_vec.sort_by(|a, b| a.0.cmp(&b.0));
+            let keys_replacements = new_keys_vec
+                .iter()
+                .map(|a| a.1.clone())
+                .collect::<Vec<LocalKey<Secp256k1>>>();
+            *keys = keys_replacements;
             Ok(())
         }
 
@@ -166,15 +175,36 @@ mod tests {
         keys.remove(6);
         keys.remove(1);
 
-        let mut new_to_old_map: HashMap<u16, u16> = HashMap::new();
-        new_to_old_map.insert(1, 3);
-        new_to_old_map.insert(3, 4);
-        new_to_old_map.insert(4, 1);
-        new_to_old_map.insert(5, 6);
-        new_to_old_map.insert(6, 5);
+        let mut old_to_new_map: HashMap<u16, u16> = HashMap::new();
+        old_to_new_map.insert(1, 4);
+        old_to_new_map.insert(3, 1);
+        old_to_new_map.insert(4, 3);
+        old_to_new_map.insert(5, 6);
+        old_to_new_map.insert(6, 5);
 
         // Simulate the replace
-        simulate_replace(&mut keys, &[2, 7], &new_to_old_map, t, n).unwrap();
+        simulate_replace(&mut keys, &[2, 7], &old_to_new_map, t, n).unwrap();
+        // check that sum of old keys is equal to sum of new keys
+        let old_linear_secret_key: Vec<_> = (0..all_keys.len())
+            .map(|i| all_keys[i].keys_linear.x_i.clone())
+            .collect();
+
+        let new_linear_secret_key: Vec<_> = (0..keys.len())
+            .map(|i| keys[i].keys_linear.x_i.clone())
+            .collect();
+        let indices: Vec<_> = (0..(t + 1) as u16).collect();
+        let vss = VerifiableSS::<Secp256k1> {
+            parameters: ShamirSecretSharing {
+                threshold: t,
+                share_count: n,
+            },
+            commitments: Vec::new(),
+        };
+        assert_eq!(
+            vss.reconstruct(&indices[..], &old_linear_secret_key[0..(t + 1) as usize]),
+            vss.reconstruct(&indices[..], &new_linear_secret_key[0..(t + 1) as usize])
+        );
+        assert_ne!(old_linear_secret_key, new_linear_secret_key);
 
         let offline_sign = simulate_offline_stage(keys, &[1, 2, 7]);
         simulate_signing(offline_sign, b"ZenGo");
