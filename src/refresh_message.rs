@@ -26,7 +26,7 @@ use zk_paillier::zkproofs::{DLogStatement, NiCorrectKeyProof, SALT_STRING};
 // Everything here can be broadcasted
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
-    pub(crate) party_index: u16,
+    pub party_index: u16,
     pdl_proof_vec: Vec<PDLwSlackProof<E, H>>,
     range_proofs: Vec<AliceProof<E, H>>,
     coefficients_committed_vec: VerifiableSS<E>,
