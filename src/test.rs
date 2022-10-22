@@ -231,7 +231,7 @@ mod tests {
         // TODO: Verify this is correct
         let new_n = keys.len() as u16;
         for key in keys.iter_mut() {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(key, new_n).unwrap();
+            let (refresh_message, new_dk) = RefreshMessage::distribute(key.i, key, new_n).unwrap();
             refresh_messages.push(refresh_message.clone());
             new_dks.insert(refresh_message.party_index.into(), new_dk);
             party_key.insert(refresh_message.party_index.into(), key.clone());
@@ -300,7 +300,7 @@ mod tests {
         let keys_len = keys.len();
         for key in keys.iter_mut() {
             let (refresh_message, new_dk) =
-                RefreshMessage::distribute(key, keys_len as u16).unwrap();
+                RefreshMessage::distribute(key.i, key, keys_len as u16).unwrap();
             broadcast_vec.push(refresh_message);
             new_dks.push(new_dk);
         }
