@@ -26,6 +26,7 @@ use zk_paillier::zkproofs::{DLogStatement, NiCorrectKeyProof, SALT_STRING};
 // Everything here can be broadcasted
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
+    pub(crate) old_party_index: u16,
     pub(crate) party_index: u16,
     pdl_proof_vec: Vec<PDLwSlackProof<E, H>>,
     range_proofs: Vec<AliceProof<E, H>>,
@@ -43,6 +44,7 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
 
 impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
     pub fn distribute(
+        old_party_index: u16,
         local_key: &mut LocalKey<E>,
         new_n: u16,
     ) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
@@ -113,6 +115,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
 
         Ok((
             RefreshMessage {
+                old_party_index,
                 party_index: local_key.i,
                 pdl_proof_vec,
                 range_proofs,
@@ -189,11 +192,9 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
             .map(|k| refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize].clone())
             .collect();
 
-        let mut indices: Vec<u16> = (0..(parameters.threshold + 1) as usize)
-            .map(|i| refresh_messages[i].party_index - 1)
+        let indices: Vec<u16> = (0..(parameters.threshold + 1) as usize)
+            .map(|i| refresh_messages[i].old_party_index - 1)
             .collect();
-
-        indices.sort();
 
         // optimization - one decryption
         let li_vec: Vec<_> = (0..parameters.threshold as usize + 1)
@@ -299,11 +300,11 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
                 );
             }
         }
-
+        let old_party_index = key.i;
         key.i = *old_to_new_map.get(&key.i).unwrap();
         key.n = new_n;
 
-        RefreshMessage::distribute(key, new_n as u16)
+        RefreshMessage::distribute(old_party_index, key, new_n as u16)
     }
 
     pub fn collect(
