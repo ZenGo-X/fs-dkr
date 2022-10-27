@@ -31,7 +31,7 @@ pub struct RingPedersenStatement<E: Curve, H: Digest + Clone> {
     pub T: BigInt,
     pub N: BigInt,
     phi: BigInt,
-    ek: EncryptionKey,
+    pub ek: EncryptionKey,
     phantom: PhantomData<(E, H)>,
 }
 
