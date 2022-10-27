@@ -17,6 +17,7 @@ use curv::cryptographic_primitives::hashing::Digest;
 use curv::cryptographic_primitives::hashing::DigestExt;
 use curv::elliptic::curves::Curve;
 use curv::BigInt;
+use paillier::EncryptionKey;
 use paillier::{KeyGeneration, Paillier};
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
@@ -26,10 +27,11 @@ use crate::error::FsDkrResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RingPedersenStatement<E: Curve, H: Digest + Clone> {
-    S: BigInt,
-    T: BigInt,
-    N: BigInt,
+    pub S: BigInt,
+    pub T: BigInt,
+    pub N: BigInt,
     phi: BigInt,
+    ek: EncryptionKey,
     phantom: PhantomData<(E, H)>,
 }
 
@@ -55,8 +57,9 @@ impl<E: Curve, H: Digest + Clone> RingPedersenStatement<E, H> {
             Self {
                 S: s,
                 T: t,
-                N: ek_tilde.n,
+                N: ek_tilde.clone().n,
                 phi: phi,
+                ek: ek_tilde,
                 phantom: PhantomData,
             },
             RingPedersenWitness {
