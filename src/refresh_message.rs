@@ -27,7 +27,7 @@ use crate::ring_pedersen_proof::{RingPedersenProof, RingPedersenStatement};
 
 // Everything here can be broadcasted
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
+pub struct RefreshMessage<E: Curve, H: Digest + Clone, const M: usize> {
     pub(crate) old_party_index: u16,
     pub(crate) party_index: u16,
     pdl_proof_vec: Vec<PDLwSlackProof<E, H>>,
@@ -41,17 +41,17 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone> {
     pub(crate) remove_party_indices: Vec<u16>,
     pub(crate) public_key: Point<E>,
     pub(crate) ring_pedersen_statement: RingPedersenStatement<E, H>,
-    pub(crate) ring_pedersen_proof: RingPedersenProof<E, H>,
+    pub(crate) ring_pedersen_proof: RingPedersenProof<E, H, M>,
     #[serde(skip)]
     pub hash_choice: HashChoice<H>,
 }
 
-impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
+impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
     pub fn distribute(
         old_party_index: u16,
         local_key: &mut LocalKey<E>,
         new_n: u16,
-    ) -> FsDkrResult<(RefreshMessage<E, H>, DecryptionKey)> {
+    ) -> FsDkrResult<(RefreshMessage<E, H, M>, DecryptionKey)> {
         assert!(local_key.t <= new_n / 2);
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
@@ -236,7 +236,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
     }
 
     pub fn replace(
-        new_parties: &[JoinMessage<E, H>],
+        new_parties: &[JoinMessage<E, H, M>],
         key: &mut LocalKey<E>,
         old_to_new_map: &HashMap<u16, u16>,
         new_n: u16,
@@ -321,7 +321,7 @@ impl<E: Curve, H: Digest + Clone> RefreshMessage<E, H> {
         refresh_messages: &[Self],
         mut local_key: &mut LocalKey<E>,
         new_dk: DecryptionKey,
-        join_messages: &[JoinMessage<E, H>],
+        join_messages: &[JoinMessage<E, H, M>],
     ) -> FsDkrResult<()> {
         let new_n = refresh_messages.len() + join_messages.len();
         RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n as u16)?;

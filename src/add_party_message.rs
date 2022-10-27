@@ -32,7 +32,7 @@ use crate::ring_pedersen_proof::{RingPedersenProof, RingPedersenStatement};
 
 /// Message used by new parties to join the protocol.
 #[derive(Clone, Deserialize, Serialize, Debug)]
-pub struct JoinMessage<E: Curve, H: Digest + Clone> {
+pub struct JoinMessage<E: Curve, H: Digest + Clone, const M: usize> {
     pub(crate) ek: EncryptionKey,
     pub(crate) dk_correctness_proof: NiCorrectKeyProof,
     pub(crate) party_index: Option<u16>,
@@ -40,7 +40,7 @@ pub struct JoinMessage<E: Curve, H: Digest + Clone> {
     pub(crate) composite_dlog_proof_base_h1: CompositeDLogProof,
     pub(crate) composite_dlog_proof_base_h2: CompositeDLogProof,
     pub(crate) ring_pedersen_statement: RingPedersenStatement<E, H>,
-    pub(crate) ring_pedersen_proof: RingPedersenProof<E, H>,
+    pub(crate) ring_pedersen_proof: RingPedersenProof<E, H, M>,
 }
 
 /// Generates the parameters needed for the h1_h2_N_tilde_vec. These parameters can be seen as
@@ -90,7 +90,7 @@ fn generate_dlog_statement_proofs() -> (DLogStatement, CompositeDLogProof, Compo
     )
 }
 
-impl<E: Curve, H: Digest + Clone> JoinMessage<E, H> {
+impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
     pub fn set_party_index(&mut self, new_party_index: u16) {
         self.party_index = Some(new_party_index);
     }
@@ -134,9 +134,9 @@ impl<E: Curve, H: Digest + Clone> JoinMessage<E, H> {
     /// the other join messages (multiple parties can be added/replaced at once).
     pub fn collect(
         &self,
-        refresh_messages: &[RefreshMessage<E, H>],
+        refresh_messages: &[RefreshMessage<E, H, M>],
         paillier_key: Keys,
-        join_messages: &[JoinMessage<E, H>],
+        join_messages: &[JoinMessage<E, H, M>],
         t: u16,
         n: u16,
     ) -> FsDkrResult<LocalKey<E>> {

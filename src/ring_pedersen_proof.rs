@@ -73,23 +73,23 @@ impl<E: Curve, H: Digest + Clone> RingPedersenStatement<E, H> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct RingPedersenProof<E: Curve, H: Digest + Clone> {
+pub struct RingPedersenProof<E: Curve, H: Digest + Clone, const M: usize> {
     A: Vec<BigInt>,
     Z: Vec<BigInt>,
     phantom: PhantomData<(E, H)>,
 }
 
 // Link to the UC non-interactive threshold ECDSA paper
-impl<E: Curve, H: Digest + Clone> RingPedersenProof<E, H> {
+impl<E: Curve, H: Digest + Clone, const M: usize> RingPedersenProof<E, H, M> {
     pub fn prove(
         witness: &RingPedersenWitness<E, H>,
         statement: &RingPedersenStatement<E, H>,
-    ) -> RingPedersenProof<E, H> {
+    ) -> RingPedersenProof<E, H, M> {
         // 1. Sample alphas from 1 -> m from \phi(N)
-        let mut a = [(); crate::M_SECURITY].map(|_| BigInt::zero());
-        let mut A = [(); crate::M_SECURITY].map(|_| BigInt::zero());
+        let mut a = [(); M].map(|_| BigInt::zero());
+        let mut A = [(); M].map(|_| BigInt::zero());
         let mut hash = H::new();
-        for i in 0..crate::M_SECURITY {
+        for i in 0..M {
             // TODO: Consider ensuring we get a unit element of this subgroup
             let a_i = BigInt::sample_below(&statement.phi);
             a[i] = a_i.clone();
@@ -101,8 +101,8 @@ impl<E: Curve, H: Digest + Clone> RingPedersenProof<E, H> {
         let e: BigInt = hash.result_bigint();
         let bitwise_e: BitVec<u8, Lsb0> = BitVec::from_vec(e.to_bytes());
 
-        let mut Z = [(); crate::M_SECURITY].map(|_| BigInt::zero());
-        for i in 0..crate::M_SECURITY {
+        let mut Z = [(); M].map(|_| BigInt::zero());
+        for i in 0..M {
             let e_i = if bitwise_e[i] {
                 BigInt::one()
             } else {
@@ -120,18 +120,18 @@ impl<E: Curve, H: Digest + Clone> RingPedersenProof<E, H> {
     }
 
     pub fn verify(
-        proof: &RingPedersenProof<E, H>,
+        proof: &RingPedersenProof<E, H, M>,
         statement: &RingPedersenStatement<E, H>,
     ) -> FsDkrResult<()> {
         let mut hash = H::new();
-        for i in 0..crate::M_SECURITY {
+        for i in 0..M {
             hash = H::chain_bigint(hash, &proof.A[i]);
         }
 
         let e: BigInt = hash.result_bigint();
         let bitwise_e: BitVec<u8, Lsb0> = BitVec::from_vec(e.to_bytes());
 
-        for i in 0..crate::M_SECURITY {
+        for i in 0..M {
             let mut e_i = 0;
             if bitwise_e[i] {
                 e_i = 1;
@@ -162,7 +162,14 @@ mod tests {
     #[test]
     fn test_ring_pedersen() {
         let (statement, witness) = RingPedersenStatement::<Secp256k1, Sha256>::generate();
-        let proof = RingPedersenProof::<Secp256k1, Sha256>::prove(&witness, &statement);
-        assert!(RingPedersenProof::<Secp256k1, Sha256>::verify(&proof, &statement).is_ok());
+        let proof = RingPedersenProof::<Secp256k1, Sha256, { crate::M_SECURITY }>::prove(
+            &witness, &statement,
+        );
+        assert!(
+            RingPedersenProof::<Secp256k1, Sha256, { crate::M_SECURITY }>::verify(
+                &proof, &statement
+            )
+            .is_ok()
+        );
     }
 }
