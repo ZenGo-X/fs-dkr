@@ -13,7 +13,7 @@
 use crate::error::{FsDkrError, FsDkrResult};
 use crate::refresh_message::RefreshMessage;
 use curv::arithmetic::{BasicOps, Modulo, One, Samplable, Zero};
-use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
+use curv::cryptographic_primitives::hashing::Digest;
 use curv::cryptographic_primitives::secret_sharing::feldman_vss::{
     ShamirSecretSharing, VerifiableSS,
 };
@@ -28,15 +28,19 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use zk_paillier::zkproofs::{CompositeDLogProof, DLogStatement, NiCorrectKeyProof};
 
+use crate::ring_pedersen_proof::{RingPedersenProof, RingPedersenStatement};
+
 /// Message used by new parties to join the protocol.
 #[derive(Clone, Deserialize, Serialize, Debug)]
-pub struct JoinMessage {
+pub struct JoinMessage<E: Curve, H: Digest + Clone> {
     pub(crate) ek: EncryptionKey,
     pub(crate) dk_correctness_proof: NiCorrectKeyProof,
     pub(crate) party_index: Option<u16>,
     pub(crate) dlog_statement: DLogStatement,
     pub(crate) composite_dlog_proof_base_h1: CompositeDLogProof,
     pub(crate) composite_dlog_proof_base_h2: CompositeDLogProof,
+    pub(crate) ring_pedersen_statement: RingPedersenStatement<E, H>,
+    pub(crate) ring_pedersen_proof: RingPedersenProof<E, H>,
 }
 
 /// Generates the parameters needed for the h1_h2_N_tilde_vec. These parameters can be seen as
@@ -86,7 +90,7 @@ fn generate_dlog_statement_proofs() -> (DLogStatement, CompositeDLogProof, Compo
     )
 }
 
-impl JoinMessage {
+impl<E: Curve, H: Digest + Clone> JoinMessage<E, H> {
     pub fn set_party_index(&mut self, new_party_index: u16) {
         self.party_index = Some(new_party_index);
     }
@@ -98,6 +102,11 @@ impl JoinMessage {
         let (dlog_statement, composite_dlog_proof_base_h1, composite_dlog_proof_base_h2) =
             generate_dlog_statement_proofs();
 
+        let (ring_pedersen_statement, ring_pedersen_witness) = RingPedersenStatement::generate();
+
+        let ring_pedersen_proof =
+            RingPedersenProof::prove(&ring_pedersen_witness, &ring_pedersen_statement);
+
         let join_message = JoinMessage {
             // in a join message, we only care about the ek and the correctness proof
             ek: paillier_key_pair.ek.clone(),
@@ -105,6 +114,8 @@ impl JoinMessage {
             dlog_statement,
             composite_dlog_proof_base_h1,
             composite_dlog_proof_base_h2,
+            ring_pedersen_statement,
+            ring_pedersen_proof,
             party_index: None,
         };
 
@@ -121,19 +132,39 @@ impl JoinMessage {
     /// tailored for a sent JoinMessage on which we assigned party_index. In this collect, a [LocalKey]
     /// is filled with the information provided by the [RefreshMessage]s from the other parties and
     /// the other join messages (multiple parties can be added/replaced at once).
-    pub fn collect<E, H>(
+    pub fn collect(
         &self,
         refresh_messages: &[RefreshMessage<E, H>],
         paillier_key: Keys,
-        join_messages: &[JoinMessage],
+        join_messages: &[JoinMessage<E, H>],
         t: u16,
         n: u16,
-    ) -> FsDkrResult<LocalKey<E>>
-    where
-        E: Curve,
-        H: Digest + Clone,
-    {
+    ) -> FsDkrResult<LocalKey<E>> {
         RefreshMessage::validate_collect(refresh_messages, t, n)?;
+
+        for refresh_message in refresh_messages.iter() {
+            RingPedersenProof::verify(
+                &refresh_message.ring_pedersen_proof,
+                &refresh_message.ring_pedersen_statement,
+            )
+            .map_err(|e| FsDkrError::RingPedersenProofValidation {
+                party_index: refresh_message.party_index,
+            })?;
+        }
+
+        for join_message in join_messages.iter() {
+            RingPedersenProof::verify(
+                &join_message.ring_pedersen_proof,
+                &join_message.ring_pedersen_statement,
+            )
+            .map_err(|e| {
+                if let Some(party_index) = join_message.party_index {
+                    FsDkrError::RingPedersenProofValidation { party_index }
+                } else {
+                    e
+                }
+            })?;
+        }
 
         // check if a party_index has been assigned to the current party
         let party_index = self.get_party_index()?;

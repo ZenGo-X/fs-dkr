@@ -19,6 +19,11 @@ default-features = false
 git = "https://github.com/webb-tools/multi-party-ecdsa"
 default-features = false
 
+[dependencies.bitvec]
+version = "1"
+default-features = false
+features = ["atomic", "alloc"]
+
 [dependencies]
 zk-paillier = { version = "0.4.3", default-features = false }
 curv = { package = "curv-kzen", version = "0.9", default-features = true }

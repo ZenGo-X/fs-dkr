@@ -16,10 +16,11 @@ mod tests {
     use multi_party_ecdsa::protocols::multi_party_ecdsa::gg_2020::state_machine::sign::{
         CompletedOfflineStage, OfflineStage, SignManual,
     };
-    use sha2::{Digest, Sha256};
+    use sha2::Sha256;
 
     use crate::add_party_message::JoinMessage;
     use crate::error::FsDkrResult;
+    use curv::cryptographic_primitives::hashing::Digest;
     use paillier::DecryptionKey;
     use round_based::dev::Simulation;
     use std::collections::HashMap;
@@ -96,7 +97,7 @@ mod tests {
         ) -> FsDkrResult<()> {
             fn generate_join_messages_and_keys(
                 number_of_new_parties: usize,
-            ) -> (Vec<JoinMessage>, Vec<Keys>) {
+            ) -> (Vec<JoinMessage<Secp256k1, Sha256>>, Vec<Keys>) {
                 // the new party generates it's join message to start joining the computation
                 (0..number_of_new_parties)
                     .map(|_| JoinMessage::distribute())
@@ -106,7 +107,7 @@ mod tests {
             fn generate_refresh_parties_replace(
                 keys: &mut [LocalKey<Secp256k1>],
                 old_to_new_map: &HashMap<u16, u16>,
-                join_messages: &[JoinMessage],
+                join_messages: &[JoinMessage<Secp256k1, Sha256>],
             ) -> (Vec<RefreshMessage<Secp256k1, Sha256>>, Vec<DecryptionKey>) {
                 let new_n = (&keys.len() + join_messages.len()) as u16;
                 keys.iter_mut()

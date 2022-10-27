@@ -9,6 +9,8 @@
 //! 1) In Bob's proofs `gamma` is sampled from `[0;q^2 * N]` and `tau` from `[0;q^3 * N_tilde]`.
 //! 2) A non-interactive version is implemented, with challenge `e` computed via Fiat-Shamir.
 
+// TODO: Verify this matches (if possible) range proofs from multi-party-ecdsa
+
 use curv::arithmetic::traits::*;
 use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
 use curv::elliptic::curves::Point;
@@ -613,7 +615,7 @@ impl SampleFromMultiplicativeGroup for BigInt {
 pub(crate) mod tests {
     use super::*;
     use curv::elliptic::curves::secp256_k1::{Secp256k1Point, Secp256k1Scalar};
-    use curv::elliptic::curves::{ECPoint, ECScalar};
+    use curv::elliptic::curves::ECScalar;
     use paillier::traits::{Encrypt, EncryptWithChosenRandomness, KeyGeneration};
     use paillier::{Add, DecryptionKey, Mul, Paillier, RawCiphertext, RawPlaintext};
     use sha2::Sha256;
