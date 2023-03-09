@@ -32,7 +32,7 @@ pub struct RefreshMessage<E: Curve, H: Digest + Clone, const M: usize> {
     pub(crate) party_index: u16,
     pdl_proof_vec: Vec<PDLwSlackProof<E, H>>,
     range_proofs: Vec<AliceProof<E, H>>,
-    coefficients_committed_vec: VerifiableSS<E>,
+    coefficients_committed_vec: VerifiableSS<E, sha2::Sha256>,
     pub(crate) points_committed_vec: Vec<Point<E>>,
     points_encrypted_vec: Vec<BigInt>,
     dk_correctness_proof: NiCorrectKeyProof,
@@ -58,7 +58,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         if new_n <= local_key.t {
             return Err(FsDkrError::NewPartyUnassignedIndexError);
         }
-        let (vss_scheme, secret_shares) = VerifiableSS::<E>::share(local_key.t, new_n, &secret);
+        let (vss_scheme, secret_shares) = VerifiableSS::<E, sha2::Sha256>::share(local_key.t, new_n, &secret);
 
         local_key.vss_scheme = vss_scheme.clone();
 
@@ -209,7 +209,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         // optimization - one decryption
         let li_vec: Vec<_> = (0..parameters.threshold as usize + 1)
             .map(|i| {
-                VerifiableSS::<E>::map_share_to_new_params(
+                VerifiableSS::<E, sha2::Sha256>::map_share_to_new_params(
                     parameters.clone().borrow(),
                     indices[i],
                     &indices,

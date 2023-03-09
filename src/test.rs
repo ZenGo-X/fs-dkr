@@ -20,7 +20,11 @@ mod tests {
 
     use crate::add_party_message::JoinMessage;
     use crate::error::FsDkrResult;
-    use curv::cryptographic_primitives::hashing::Digest;
+    use curv::{
+        elliptic::curves::Scalar,
+        cryptographic_primitives::{
+            hashing::Digest, proofs::sigma_dlog::DLogProof}
+    };
     use paillier::DecryptionKey;
     use round_based::dev::Simulation;
     use std::collections::HashMap;
@@ -46,12 +50,14 @@ mod tests {
             .map(|i| keys[i].keys_linear.x_i.clone())
             .collect();
         let indices: Vec<_> = (0..(t + 1) as u16).collect();
-        let vss = VerifiableSS::<Secp256k1> {
+        let vss = VerifiableSS::<Secp256k1, sha2::Sha256> {
             parameters: ShamirSecretSharing {
                 threshold: t,
                 share_count: n,
             },
             commitments: Vec::new(),
+            proof: DLogProof::<Secp256k1, sha2::Sha256>::prove(
+                &Scalar::random()),
         };
         assert_eq!(
             vss.reconstruct(&indices[..], &old_linear_secret_key[0..(t + 1) as usize]),
@@ -85,7 +91,7 @@ mod tests {
         let offline_sign = simulate_offline_stage(keys, &[3, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
-
+    
     #[test]
     fn test_add_party_with_permute() {
         fn simulate_replace<const M: usize>(
@@ -198,12 +204,14 @@ mod tests {
             .map(|i| keys[i].keys_linear.x_i.clone())
             .collect();
         let indices: Vec<_> = (0..(t + 1) as u16).collect();
-        let vss = VerifiableSS::<Secp256k1> {
+        let vss = VerifiableSS::<Secp256k1, sha2::Sha256> {
             parameters: ShamirSecretSharing {
                 threshold: t,
                 share_count: n,
             },
             commitments: Vec::new(),
+            proof: DLogProof::<Secp256k1, sha2::Sha256>::prove(
+                &Scalar::random()),
         };
         assert_eq!(
             vss.reconstruct(&indices[..], &old_linear_secret_key[0..(t + 1) as usize]),

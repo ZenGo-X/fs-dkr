@@ -273,7 +273,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
         }
 
         // generate the vss_scheme for the LocalKey
-        let (vss_scheme, _) = VerifiableSS::<E>::share(t, n, &new_share_fe);
+        let (vss_scheme, _) = VerifiableSS::<E, sha2::Sha256>::share(t, n, &new_share_fe);
         // TODO: secret cleanup might be needed.
 
         let local_key = LocalKey {
