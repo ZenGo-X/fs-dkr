@@ -16,9 +16,7 @@ package = "kzen-paillier"
 default-features = false
 
 [dependencies.multi-party-ecdsa]
-#git = "https://github.com/webb-tools/multi-party-ecdsa"
-git = "https://github.com/tmpfs/multi-party-ecdsa"
-branch = "deps-update"
+git = "https://github.com/webb-tools/multi-party-ecdsa"
 default-features = false
 
 [dependencies.bitvec]
@@ -35,3 +33,8 @@ zeroize = "1"
 round-based = { version = "0.1.4", features = ["dev"] }
 thiserror = "1.0.26"
 sha2 = "0.9"
+
+[features]
+default = ["rust-gmp-kzen"]
+rust-gmp-kzen = ["curv/rust-gmp-kzen"]
+num-bigint = ["curv/num-bigint"]

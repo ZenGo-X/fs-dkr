@@ -147,7 +147,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
                 &refresh_message.ring_pedersen_proof,
                 &refresh_message.ring_pedersen_statement,
             )
-            .map_err(|e| FsDkrError::RingPedersenProofValidation {
+            .map_err(|_| FsDkrError::RingPedersenProofValidation {
                 party_index: refresh_message.party_index,
             })?;
         }
