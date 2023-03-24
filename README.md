@@ -11,7 +11,7 @@ The FS-DKG protocol is a one round DKG based on Publicly Verifiable Secret Shari
 1. It introduces a factoring assumptions (DCRA)
 2. it is insecure against rushing adversary
 
-Rushing adversary is a common assumption in Multiparty Computation (MPC). In FS-DKG, an adversary waiting to receive messages from all other parties will be able to decide on the final public key. In the worst case it can lead to a rogue-key attack, giving full control of the secret key to the attacker. This is the main reason, in our opinion, why  FS-DKG, altough with prominent features, was over-looked for the past 20 years.
+Rushing adversary is a common assumption in Multiparty Computation (MPC). In FS-DKG, an adversary waiting to receive messages from all other parties will be able to decide on the final public key. In the worst case it can lead to a rogue-key attack, giving full control of the secret key to the attacker. This is the main reason, in our opinion, why  FS-DKG, although with prominent features, was over-looked for the past 20 years.
 in this write-up we show how by adjusting FS-DKG to key rotation for threshold ecdsa the above shortcomings are avoided.
 
 ## Our Model
