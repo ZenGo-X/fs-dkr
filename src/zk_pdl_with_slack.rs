@@ -37,6 +37,7 @@ pub struct PDLwSlackWitness<E: Curve = Secp256k1> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(bound = "E: Curve, H: Digest + Clone")]
 pub struct PDLwSlackProof<E: Curve, H: Digest + Clone> {
     z: BigInt,
     u1: Point<E>,

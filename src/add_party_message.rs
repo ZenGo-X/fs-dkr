@@ -32,6 +32,7 @@ use crate::ring_pedersen_proof::{RingPedersenProof, RingPedersenStatement};
 
 /// Message used by new parties to join the protocol.
 #[derive(Clone, Deserialize, Serialize, Debug)]
+#[serde(bound = "E: Curve, H: Digest + Clone")]
 pub struct JoinMessage<E: Curve, H: Digest + Clone, const M: usize> {
     pub(crate) ek: EncryptionKey,
     pub(crate) dk_correctness_proof: NiCorrectKeyProof,

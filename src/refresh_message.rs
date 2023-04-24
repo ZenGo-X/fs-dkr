@@ -27,6 +27,7 @@ use crate::ring_pedersen_proof::{RingPedersenProof, RingPedersenStatement};
 
 // Everything here can be broadcasted
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(bound = "E: Curve, H: Digest + Clone")]
 pub struct RefreshMessage<E: Curve, H: Digest + Clone, const M: usize> {
     pub(crate) old_party_index: u16,
     pub(crate) party_index: u16,

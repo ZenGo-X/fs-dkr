@@ -26,12 +26,14 @@ use crate::error::FsDkrError;
 use crate::error::FsDkrResult;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "E: Curve, H: Digest + Clone")]
 pub struct RingPedersenStatement<E: Curve, H: Digest + Clone> {
     pub S: BigInt,
     pub T: BigInt,
     pub N: BigInt,
     phi: BigInt,
     pub ek: EncryptionKey,
+    #[serde(skip)]
     phantom: PhantomData<(E, H)>,
 }
 
@@ -73,9 +75,11 @@ impl<E: Curve, H: Digest + Clone> RingPedersenStatement<E, H> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "E: Curve, H: Digest + Clone")]
 pub struct RingPedersenProof<E: Curve, H: Digest + Clone, const M: usize> {
     A: Vec<BigInt>,
     Z: Vec<BigInt>,
+    #[serde(skip)]
     phantom: PhantomData<(E, H)>,
 }
 
