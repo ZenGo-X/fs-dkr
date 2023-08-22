@@ -51,15 +51,16 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
     pub fn distribute(
         old_party_index: u16,
         local_key: &mut LocalKey<E>,
+        new_t: u16,
         new_n: u16,
     ) -> FsDkrResult<(RefreshMessage<E, H, M>, DecryptionKey)> {
-        assert!(local_key.t <= new_n / 2);
+        assert!(new_t <= new_n / 2);
         let secret = local_key.keys_linear.x_i.clone();
         // secret share old key
-        if new_n <= local_key.t {
+        if new_n <= new_t {
             return Err(FsDkrError::NewPartyUnassignedIndexError);
         }
-        let (vss_scheme, secret_shares) = VerifiableSS::<E, sha2::Sha256>::share(local_key.t, new_n, &secret);
+        let (vss_scheme, secret_shares) = VerifiableSS::<E, sha2::Sha256>::share(new_t, new_n, &secret);
 
         local_key.vss_scheme = vss_scheme.clone();
 
@@ -144,11 +145,12 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         ))
     }
 
-    pub fn validate_collect(refresh_messages: &[Self], t: u16, n: u16) -> FsDkrResult<()> {
-        // check we got at least threshold t refresh messages
-        if refresh_messages.len() <= t.into() {
+    pub fn validate_collect(refresh_messages: &[Self], current_t: u16, new_n: u16) -> FsDkrResult<()> {
+        // check we got at least current threshold t + 1 refresh messages
+        // (i.e a quorum of existing parties has sent refresh messages).
+        if refresh_messages.len() <= current_t.into() {
             return Err(FsDkrError::PartiesThresholdViolation {
-                threshold: t,
+                threshold: current_t,
                 refreshed_keys: refresh_messages.len(),
             });
         }
@@ -175,7 +177,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         }
 
         for refresh_message in refresh_messages.iter() {
-            for i in 0..n as usize {
+            for i in 0..new_n as usize {
                 //TODO: we should handle the case of t<i<n
                 if refresh_message
                     .coefficients_committed_vec
@@ -195,6 +197,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         party_index: u16,
         parameters: &'a ShamirSecretSharing,
         ek: &'a EncryptionKey,
+        current_t: u16,
     ) -> (RawCiphertext<'a>, Vec<Scalar<E>>) {
         // TODO: check we have large enough qualified set , at least t+1
         //decrypt the new share
@@ -203,12 +206,12 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
             .map(|k| refresh_messages[k].points_encrypted_vec[(party_index - 1) as usize].clone())
             .collect();
 
-        let indices: Vec<u16> = (0..(parameters.threshold + 1) as usize)
+        let indices: Vec<u16> = (0..(current_t + 1) as usize)
             .map(|i| refresh_messages[i].old_party_index - 1)
             .collect();
 
         // optimization - one decryption
-        let li_vec: Vec<_> = (0..parameters.threshold as usize + 1)
+        let li_vec: Vec<_> = (0..current_t as usize + 1)
             .map(|i| {
                 VerifiableSS::<E, sha2::Sha256>::map_share_to_new_params(
                     parameters.clone().borrow(),
@@ -218,7 +221,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
             })
             .collect();
 
-        let ciphertext_vec_at_indices_mapped: Vec<_> = (0..(parameters.threshold + 1) as usize)
+        let ciphertext_vec_at_indices_mapped: Vec<_> = (0..(current_t + 1) as usize)
             .map(|i| {
                 Paillier::mul(
                     ek,
@@ -240,6 +243,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         new_parties: &[JoinMessage<E, H, M>],
         key: &mut LocalKey<E>,
         old_to_new_map: &HashMap<u16, u16>,
+        new_t: u16,
         new_n: u16,
     ) -> FsDkrResult<(Self, DecryptionKey)> {
         let current_len = key.paillier_key_vec.len() as u16;
@@ -313,9 +317,10 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         }
         let old_party_index = key.i;
         key.i = *old_to_new_map.get(&key.i).unwrap();
+        key.t = new_t;
         key.n = new_n;
 
-        RefreshMessage::distribute(old_party_index, key, new_n as u16)
+        RefreshMessage::distribute(old_party_index, key, new_t, new_n)
     }
 
     pub fn collect(
@@ -323,9 +328,10 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
         mut local_key: &mut LocalKey<E>,
         new_dk: DecryptionKey,
         join_messages: &[JoinMessage<E, H, M>],
+        current_t: u16,
     ) -> FsDkrResult<()> {
         let new_n = refresh_messages.len() + join_messages.len();
-        RefreshMessage::validate_collect(refresh_messages, local_key.t, new_n as u16)?;
+        RefreshMessage::validate_collect(refresh_messages, current_t, new_n as u16)?;
 
         for refresh_message in refresh_messages.iter() {
             for i in 0..(new_n as usize) {
@@ -370,6 +376,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
             local_key.i,
             &local_key.vss_scheme.parameters,
             &old_ek,
+            current_t
         );
 
         for refresh_message in refresh_messages.iter() {
@@ -457,7 +464,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> RefreshMessage<E, H, M> {
                 i,
                 refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone(),
             );
-            for j in 1..local_key.t as usize + 1 {
+            for j in 1..current_t as usize + 1 {
                 local_key.pk_vec[i] = local_key.pk_vec[i].clone()
                     + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
             }

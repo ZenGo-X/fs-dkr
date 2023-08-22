@@ -39,7 +39,7 @@ mod tests {
         let mut keys = simulate_keygen(t, n);
 
         let old_keys = keys.clone();
-        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys);
+        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys, None);
 
         // check that sum of old keys is equal to sum of new keys
         let old_linear_secret_key: Vec<_> = (0..old_keys.len())
@@ -71,10 +71,10 @@ mod tests {
         let mut keys = simulate_keygen(2, 5);
         let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
         simulate_signing(offline_sign, b"ZenGo");
-        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys);
+        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys, None);
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
-        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys);
+        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys, None);
         let offline_sign = simulate_offline_stage(keys, &[1, 3, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
@@ -84,10 +84,10 @@ mod tests {
         let mut keys = simulate_keygen(2, 5);
         let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
         simulate_signing(offline_sign, b"ZenGo");
-        simulate_dkr_removal::<{ crate::M_SECURITY }>(&mut keys, [1].to_vec());
+        simulate_dkr_removal::<{ crate::M_SECURITY }>(&mut keys, [1].to_vec(), None);
         let offline_sign = simulate_offline_stage(keys.clone(), &[2, 3, 4]);
         simulate_signing(offline_sign, b"ZenGo");
-        simulate_dkr_removal::<{ crate::M_SECURITY }>(&mut keys, [1, 2].to_vec());
+        simulate_dkr_removal::<{ crate::M_SECURITY }>(&mut keys, [1, 2].to_vec(), None);
         let offline_sign = simulate_offline_stage(keys, &[3, 4, 5]);
         simulate_signing(offline_sign, b"ZenGo");
     }
@@ -121,7 +121,7 @@ mod tests {
                 let new_n = (&keys.len() + join_messages.len()) as u16;
                 keys.iter_mut()
                     .map(|key| {
-                        RefreshMessage::replace(join_messages, key, old_to_new_map, new_n).unwrap()
+                        RefreshMessage::replace(join_messages, key, old_to_new_map, key.t, new_n).unwrap()
                     })
                     .unzip()
             }
@@ -148,6 +148,7 @@ mod tests {
                     &mut keys[i],
                     dk_keys[i].clone(),
                     join_messages.as_slice(),
+                    t,
                 )
                 .expect("");
                 new_keys_vec.push((keys[i].i - 1, keys[i].clone()));
@@ -162,6 +163,7 @@ mod tests {
                     join_messages.as_slice(),
                     t,
                     n,
+                    t,
                 )?;
 
                 new_keys_vec.push((party_index - 1, local_key));
@@ -223,6 +225,21 @@ mod tests {
         simulate_signing(offline_sign, b"ZenGo");
     }
 
+    #[test]
+    fn test_change_threshold_sign_rotate_sign() {
+        let mut keys = simulate_keygen(2, 5);
+        let offline_sign = simulate_offline_stage(keys.clone(), &[1, 2, 3]);
+        simulate_signing(offline_sign, b"ZenGo");
+        // Change threshold to 1 (i.e quorum size = 2).
+        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys, Some(1));
+        let offline_sign = simulate_offline_stage(keys.clone(), &[3, 4]);
+        simulate_signing(offline_sign, b"ZenGo");
+        // Change threshold to back to 2 (i.e quorum size = 3).
+        simulate_dkr::<{ crate::M_SECURITY }>(&mut keys, Some(2));
+        let offline_sign = simulate_offline_stage(keys, &[1, 3, 5]);
+        simulate_signing(offline_sign, b"ZenGo");
+    }
+
     fn simulate_keygen(t: u16, n: u16) -> Vec<LocalKey<Secp256k1>> {
         //simulate keygen
         let mut simulation = Simulation::new();
@@ -238,6 +255,7 @@ mod tests {
     fn simulate_dkr_removal<const M: usize>(
         keys: &mut Vec<LocalKey<Secp256k1>>,
         remove_party_indices: Vec<u16>,
+        new_t_option: Option<u16>,
     ) {
         let mut broadcast_messages: HashMap<usize, Vec<RefreshMessage<Secp256k1, Sha256, M>>> =
             HashMap::new();
@@ -246,8 +264,10 @@ mod tests {
         let mut party_key: HashMap<usize, LocalKey<Secp256k1>> = HashMap::new();
         // TODO: Verify this is correct
         let new_n = keys.len() as u16;
+        let current_t = keys[0].t;
+        let new_t = new_t_option.unwrap_or(current_t);
         for key in keys.iter_mut() {
-            let (refresh_message, new_dk) = RefreshMessage::distribute(key.i, key, new_n).unwrap();
+            let (refresh_message, new_dk) = RefreshMessage::distribute(key.i, key, new_t, new_n).unwrap();
             refresh_messages.push(refresh_message.clone());
             new_dks.insert(refresh_message.party_index.into(), new_dk);
             party_key.insert(refresh_message.party_index.into(), key.clone());
@@ -293,6 +313,7 @@ mod tests {
                 key,
                 new_dks[party].clone(),
                 &[],
+                current_t
             )
             .expect("");
         }
@@ -303,6 +324,7 @@ mod tests {
                 &mut keys[remove_party_index as usize],
                 new_dks[&(remove_party_index as usize)].clone(),
                 &[],
+                current_t
             );
             assert!(result.is_err());
         }
@@ -310,6 +332,7 @@ mod tests {
 
     fn simulate_dkr<const M: usize>(
         keys: &mut Vec<LocalKey<Secp256k1>>,
+        new_t_option: Option<u16>,
     ) -> (
         Vec<RefreshMessage<Secp256k1, Sha256, M>>,
         Vec<DecryptionKey>,
@@ -317,16 +340,18 @@ mod tests {
         let mut broadcast_vec: Vec<RefreshMessage<Secp256k1, Sha256, M>> = Vec::new();
         let mut new_dks: Vec<DecryptionKey> = Vec::new();
         let keys_len = keys.len();
+        let current_t = keys[0].t;
+        let new_t = new_t_option.unwrap_or(current_t);
         for key in keys.iter_mut() {
             let (refresh_message, new_dk) =
-                RefreshMessage::distribute(key.i, key, keys_len as u16).unwrap();
+                RefreshMessage::distribute(key.i, key, new_t, keys_len as u16).unwrap();
             broadcast_vec.push(refresh_message);
             new_dks.push(new_dk);
         }
 
         // keys will be updated to refreshed values
         for i in 0..keys.len() as usize {
-            RefreshMessage::collect(&broadcast_vec, &mut keys[i], new_dks[i].clone(), &[])
+            RefreshMessage::collect(&broadcast_vec, &mut keys[i], new_dks[i].clone(), &[], current_t)
                 .expect("");
         }
 

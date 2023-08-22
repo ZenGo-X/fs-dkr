@@ -138,10 +138,11 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
         refresh_messages: &[RefreshMessage<E, H, M>],
         paillier_key: Keys,
         join_messages: &[JoinMessage<E, H, M>],
-        t: u16,
-        n: u16,
+        new_t: u16,
+        new_n: u16,
+        current_t: u16,
     ) -> FsDkrResult<LocalKey<E>> {
-        RefreshMessage::validate_collect(refresh_messages, t, n)?;
+        RefreshMessage::validate_collect(refresh_messages, current_t, new_n)?;
 
         for refresh_message in refresh_messages.iter() {
             RingPedersenProof::verify(
@@ -177,8 +178,8 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
         }
 
         let parameters = ShamirSecretSharing {
-            threshold: t,
-            share_count: n,
+            threshold: new_t,
+            share_count: new_n,
         };
 
         // generate a new share, the details can be found here https://hackmd.io/@omershlo/Hy1jBo6JY.
@@ -187,6 +188,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
             party_index,
             &parameters,
             &paillier_key.ek,
+            current_t
         );
         let new_share = Paillier::decrypt(&paillier_key.dk, cipher_text_sum)
             .0
@@ -200,12 +202,12 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
             x_i: key_linear_x_i,
             y: key_linear_y,
         };
-        let mut pk_vec: Vec<_> = (0..n as usize)
+        let mut pk_vec: Vec<_> = (0..new_n as usize)
             .map(|i| refresh_messages[0].points_committed_vec[i].clone() * li_vec[0].clone())
             .collect();
 
-        for i in 0..n as usize {
-            for j in 1..(t + 1) as usize {
+        for i in 0..new_n as usize {
+            for j in 1..(current_t + 1) as usize {
                 pk_vec[i] = pk_vec[i].clone()
                     + refresh_messages[j].points_committed_vec[i].clone() * li_vec[j].clone();
             }
@@ -241,7 +243,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
             .collect();
 
         // generate the paillier public key vec needed for the LocalKey generation.
-        let paillier_key_vec: Vec<EncryptionKey> = (1..n + 1)
+        let paillier_key_vec: Vec<EncryptionKey> = (1..new_n + 1)
             .map(|party| {
                 let ek = available_parties.get(&party);
                 match ek {
@@ -254,7 +256,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
             })
             .collect();
         // generate the DLogStatement vec needed for the LocalKey generation.
-        let h1_h2_ntilde_vec: Vec<DLogStatement> = (1..n + 1)
+        let h1_h2_ntilde_vec: Vec<DLogStatement> = (1..new_n + 1)
             .map(|party| {
                 let statement = available_h1_h2_ntilde_vec.get(&party);
 
@@ -274,7 +276,7 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
         }
 
         // generate the vss_scheme for the LocalKey
-        let (vss_scheme, _) = VerifiableSS::<E, sha2::Sha256>::share(t, n, &new_share_fe);
+        let (vss_scheme, _) = VerifiableSS::<E, sha2::Sha256>::share(new_t, new_n, &new_share_fe);
         // TODO: secret cleanup might be needed.
 
         let local_key = LocalKey {
@@ -286,8 +288,8 @@ impl<E: Curve, H: Digest + Clone, const M: usize> JoinMessage<E, H, M> {
             h1_h2_n_tilde_vec: h1_h2_ntilde_vec,
             vss_scheme,
             i: party_index,
-            t: t,
-            n: n,
+            t: new_t,
+            n: new_n,
         };
 
         Ok(local_key)
