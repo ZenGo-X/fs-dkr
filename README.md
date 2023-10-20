@@ -1,10 +1,11 @@
 # FS-DKR: One Round Distributed Key Rotation
 
+## Deprecated
+
+This repository has now been merged into the [cggmp-threshold-ecdsa repository](https://github.com/webb-tools/cggmp-threshold-ecdsa/) and any improvements and updates will happen there. Consider this repository deprecated.
 
 ## Intro
 In this note we aim to re-purpose the [Fouque-Stern](https://hal.inria.fr/inria-00565274/document) Distributed Key Generation (DKG) to support a secure Distributed Key Refresh (DKR). As we claim, FS-DKR is well suited for rotation of [threshold ECDSA](https://eprint.iacr.org/2020/540.pdf) keys.
-
-
 
 ## Background
 The FS-DKG protocol is a one round DKG based on Publicly Verifiable Secret Sharing (PVSS) and the [Paillier cryptosystem](https://en.wikipedia.org/wiki/Paillier_cryptosystem). There are two major security shortcomings to FS-DKG:
